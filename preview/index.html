@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PrefixShield UI preview</title>
+  <style>
+    :root {
+      --bg: #0e1116;
+      --card: #171b22;
+      --text: #e8eaed;
+      --muted: #9aa3b2;
+      --blue: #7c9cff;
+      --green: #8fdba8;
+      --red: #e8a0a0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Google Sans", "Segoe UI", sans-serif;
+      background: #1a1c22;
+      color: var(--text);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 28px;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 32px 20px;
+    }
+    .note {
+      max-width: 360px;
+      line-height: 1.45;
+    }
+    .note h1 { font-size: 1.4rem; margin: 0 0 8px; }
+    .note p { color: #c5cad3; margin: 0 0 12px; }
+    .note li { margin: 6px 0; color: #c5cad3; }
+    .phone {
+      width: 360px;
+      height: 740px;
+      background: var(--bg);
+      border-radius: 32px;
+      border: 8px solid #2a2f3a;
+      box-shadow: 0 20px 60px rgba(0,0,0,.45);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .status-bar {
+      height: 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 16px;
+      font-size: 12px;
+      color: #c5cad3;
+    }
+    .scroll {
+      flex: 1;
+      overflow: auto;
+      padding: 8px 16px 24px;
+    }
+    .header { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; }
+    .shield {
+      width: 28px; height: 28px; border-radius: 8px;
+      background: var(--blue); color: #0e1116;
+      display: grid; place-items: center; font-weight: 800;
+    }
+    .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+    .card {
+      background: var(--card);
+      border-radius: 16px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+    }
+    .ok { color: var(--green); font-weight: 600; }
+    .warn { color: var(--red); font-weight: 600; }
+    .muted { color: var(--muted); font-size: 13px; margin-top: 4px; }
+    .empty { color: var(--muted); font-size: 13px; margin: 0 4px 12px; }
+    .row { display: flex; gap: 8px; margin-top: 12px; }
+    input, button {
+      font: inherit; border: 0; border-radius: 10px;
+    }
+    input {
+      flex: 1; padding: 10px 12px; background: #0e1116; color: var(--text);
+      border: 1px solid #2c3340;
+    }
+    button.primary {
+      background: var(--blue); color: #0e1116; font-weight: 600; padding: 10px 14px; cursor: pointer;
+    }
+    button.ghost {
+      background: transparent; color: var(--blue); cursor: pointer; padding: 4px 8px;
+    }
+    .rule { display: flex; align-items: center; gap: 8px; }
+    .rule .grow { flex: 1; }
+    .switch {
+      width: 42px; height: 24px; background: var(--blue); border-radius: 99px; position: relative; cursor: pointer;
+    }
+    .switch::after {
+      content: ""; position: absolute; width: 18px; height: 18px; background: white;
+      border-radius: 50%; top: 3px; right: 3px;
+    }
+    .switch.off { background: #3a4150; }
+    .switch.off::after { right: auto; left: 3px; }
+    .section { display: flex; align-items: center; gap: 8px; margin: 8px 0 10px; font-weight: 600; }
+    .blocked { color: var(--red); font-size: 13px; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="note">
+    <h1>Try the UI here</h1>
+    <p>Interactive mock of PrefixShield. Series you add are saved in this browser (same idea as phone local storage). Nothing is hard-coded.</p>
+    <ul>
+      <li>Type starting digits, press Add</li>
+      <li>Pause or delete a series</li>
+      <li>Reload the page — your list stays</li>
+    </ul>
+    <p>This is not the Android APK. On the phone the same list lives in SharedPreferences.</p>
+  </div>
+
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span>SIM 1</span></div>
+    <div class="scroll">
+      <div class="header">
+        <div class="shield">P</div>
+        <div>
+          <div style="font-size:1.25rem;font-weight:650">PrefixShield</div>
+          <div class="sub">Block spam series without changing your dialer</div>
+        </div>
+      </div>
+
+      <div class="card" id="status-card">
+        <div class="warn" id="status-title">Call screening is off</div>
+        <div class="muted" id="status-copy">PrefixShield needs the Call screening role. This is not the default dialer role, so your Phone app stays Google's.</div>
+        <div class="row" id="enable-row">
+          <button class="primary" id="enable">Enable call screening</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="font-weight:600">Blocked prefixes</div>
+        <div class="muted">Add the starting digits of a spam series. Saved on this phone only — no database.</div>
+        <div class="row">
+          <input id="prefix" placeholder="Starting digits" />
+          <button class="primary" id="add">Add</button>
+        </div>
+      </div>
+
+      <p class="empty" id="rules-empty">No series yet. Add one above when you know the shared starting digits.</p>
+      <div id="rules"></div>
+
+      <div class="section">Recently blocked</div>
+      <p class="empty">Blocked calls will show up here after the app is installed on a phone.</p>
+    </div>
+  </div>
+
+  <script>
+    const KEY = "prefixshield.rules";
+    const rulesEl = document.getElementById("rules");
+    const emptyEl = document.getElementById("rules-empty");
+    const input = document.getElementById("prefix");
+
+    function loadRules() {
+      try {
+        const raw = localStorage.getItem(KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+
+    let rules = loadRules();
+
+    function save() {
+      localStorage.setItem(KEY, JSON.stringify(rules));
+    }
+
+    function render() {
+      emptyEl.style.display = rules.length ? "none" : "block";
+      rulesEl.innerHTML = rules.map((r, i) => `
+        <div class="card rule">
+          <div class="grow">
+            <div style="font-weight:600">+… ${r.prefix}</div>
+            <div class="muted">${r.enabled ? "Blocking this series" : "Paused"}</div>
+          </div>
+          <div class="switch ${r.enabled ? "" : "off"}" data-i="${i}"></div>
+          <button class="ghost" data-del="${i}">✕</button>
+        </div>
+      `).join("");
+    }
+
+    render();
+
+    document.getElementById("add").onclick = () => {
+      const v = input.value.replace(/\D/g, "");
+      if (v.length < 3) {
+        alert("Enter at least 3 digits of the series to block");
+        return;
+      }
+      if (!rules.some(r => r.prefix === v)) {
+        rules.unshift({ prefix: v, enabled: true });
+        save();
+      }
+      input.value = "";
+      render();
+    };
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") document.getElementById("add").click();
+    });
+
+    rulesEl.addEventListener("click", (e) => {
+      const sw = e.target.closest(".switch");
+      const del = e.target.closest("[data-del]");
+      if (sw) {
+        const i = +sw.dataset.i;
+        rules[i].enabled = !rules[i].enabled;
+        save();
+        render();
+      }
+      if (del) {
+        rules.splice(+del.dataset.del, 1);
+        save();
+        render();
+      }
+    });
+
+    document.getElementById("enable").onclick = () => {
+      document.getElementById("status-title").className = "ok";
+      document.getElementById("status-title").textContent = "Call screening is on";
+      document.getElementById("status-copy").textContent =
+        "Google Dialer is unchanged. Incoming numbers matching your series will be rejected.";
+      document.getElementById("enable-row").style.display = "none";
+    };
+  </script>
+</body>
+</html>
