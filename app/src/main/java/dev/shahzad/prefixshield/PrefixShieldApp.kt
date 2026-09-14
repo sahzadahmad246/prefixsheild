@@ -12,6 +12,7 @@ class PrefixShieldApp : Application() {
         super.onCreate()
         prefixStore = PrefixStore(this)
         blockedLogStore = BlockedLogStore(this)
+        BlockedNotifier.createChannel(this)
         instance = this
     }
 

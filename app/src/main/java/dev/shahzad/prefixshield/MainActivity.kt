@@ -1,11 +1,19 @@
 package dev.shahzad.prefixshield
 
+import android.Manifest
 import android.app.role.RoleManager
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.SharedPreferences
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -74,6 +82,10 @@ class MainActivity : ComponentActivity() {
     private val app get() = application as PrefixShieldApp
 
     private var screeningEnabled by mutableStateOf(false)
+    private var blockingOn by mutableStateOf(true)
+    private var blockSavedOn by mutableStateOf(true)
+    private var phoneAccessEnabled by mutableStateOf(false)
+    private var requestedPermsOnce = false
     private var prefixInput by mutableStateOf("")
     private var rules by mutableStateOf(listOf<PrefixRule>())
     private var blockedCalls by mutableStateOf(listOf<BlockedCall>())
@@ -87,18 +99,33 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val logListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        runOnUiThread { refresh() }
+    }
+
+    private val permLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { refresh() }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         refresh()
+        app.blockedLogStore.register(logListener)
         setContent {
             MaterialTheme(colorScheme = appColors) {
                 App(
                     screeningEnabled = screeningEnabled,
+                    blockingOn = blockingOn,
+                    blockSavedOn = blockSavedOn,
+                    phoneAccessEnabled = phoneAccessEnabled,
                     prefixInput = prefixInput,
                     onPrefixInputChange = { prefixInput = it },
                     rules = rules,
                     blockedCalls = blockedCalls,
                     onEnableScreening = ::requestCallScreeningRole,
+                    onToggleBlocking = ::toggleBlocking,
+                    onToggleBlockSaved = ::toggleBlockSaved,
+                    onGrantPhoneAccess = ::requestPhoneAccess,
                     onAddPrefix = ::addPrefix,
                     onTogglePrefix = { prefix, enabled ->
                         rules = app.prefixStore.toggle(prefix, enabled)
@@ -108,6 +135,8 @@ class MainActivity : ComponentActivity() {
                     },
                     onClearLog = {
                         app.blockedLogStore.clear()
+                        PendingNotifications(this).clear()
+                        BlockedNotifier.cancel(this)
                         blockedCalls = emptyList()
                     }
                 )
@@ -115,13 +144,27 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        clearUnseenNotes()
+    }
+
     override fun onResume() {
         super.onResume()
+        clearUnseenNotes()
         refresh()
+    }
+
+    override fun onDestroy() {
+        app.blockedLogStore.unregister(logListener)
+        super.onDestroy()
     }
 
     private fun refresh() {
         screeningEnabled = isCallScreeningHeld()
+        blockingOn = screeningEnabled && BlockSettings(this).isBlockingEnabled()
+        blockSavedOn = BlockSettings(this).blockSavedNumbers()
+        phoneAccessEnabled = hasPhoneAccess()
         rules = app.prefixStore.list()
         blockedCalls = app.blockedLogStore.list()
     }
@@ -147,6 +190,72 @@ class MainActivity : ComponentActivity() {
             return
         }
         roleLauncher.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING))
+        BlockSettings(this).setBlockingEnabled(true)
+        requestPhoneAccess()
+    }
+
+    private fun toggleBlocking(enabled: Boolean) {
+        if (enabled) {
+            BlockSettings(this).setBlockingEnabled(true)
+            if (!isCallScreeningHeld()) {
+                requestCallScreeningRole()
+            } else {
+                refresh()
+            }
+        } else {
+            BlockSettings(this).setBlockingEnabled(false)
+            refresh()
+        }
+    }
+
+    private fun toggleBlockSaved(enabled: Boolean) {
+        BlockSettings(this).setBlockSavedNumbers(enabled)
+        if (enabled) requestPhoneAccess()
+        refresh()
+    }
+
+    private fun clearUnseenNotes() {
+        PendingNotifications(this).clear()
+        BlockedNotifier.cancel(this)
+    }
+
+    private fun hasPhoneAccess(): Boolean = requiredPhonePerms().all { permission ->
+        ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun requestPhoneAccess() {
+        val missing = requiredPhonePerms().filter { permission ->
+            ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) {
+            refresh()
+            return
+        }
+        val openSettings = requestedPermsOnce &&
+            missing.any { !shouldShowRequestPermissionRationale(it) }
+        requestedPermsOnce = true
+        if (openSettings) {
+            startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", packageName, null)
+                }
+            )
+        } else {
+            permLauncher.launch(missing.toTypedArray())
+        }
+    }
+
+    private fun requiredPhonePerms(): Array<String> {
+        val perms = mutableListOf(
+            Manifest.permission.READ_PHONE_STATE,
+            Manifest.permission.READ_CALL_LOG,
+            Manifest.permission.READ_CONTACTS,
+            Manifest.permission.ANSWER_PHONE_CALLS
+        )
+        if (Build.VERSION.SDK_INT >= 33) {
+            perms += Manifest.permission.POST_NOTIFICATIONS
+        }
+        return perms.toTypedArray()
     }
 }
 
@@ -171,11 +280,17 @@ private val appColors = darkColorScheme(
 @Composable
 private fun App(
     screeningEnabled: Boolean,
+    blockingOn: Boolean,
+    blockSavedOn: Boolean,
+    phoneAccessEnabled: Boolean,
     prefixInput: String,
     onPrefixInputChange: (String) -> Unit,
     rules: List<PrefixRule>,
     blockedCalls: List<BlockedCall>,
     onEnableScreening: () -> Unit,
+    onToggleBlocking: (Boolean) -> Unit,
+    onToggleBlockSaved: (Boolean) -> Unit,
+    onGrantPhoneAccess: () -> Unit,
     onAddPrefix: () -> Unit,
     onTogglePrefix: (String, Boolean) -> Unit,
     onRemovePrefix: (String) -> Unit,
@@ -215,10 +330,16 @@ private fun App(
             HomeTab(
                 padding = padding,
                 screeningEnabled = screeningEnabled,
+                blockingOn = blockingOn,
+                blockSavedOn = blockSavedOn,
+                phoneAccessEnabled = phoneAccessEnabled,
                 prefixInput = prefixInput,
                 onPrefixInputChange = onPrefixInputChange,
                 rules = rules,
                 onEnableScreening = onEnableScreening,
+                onToggleBlocking = onToggleBlocking,
+                onToggleBlockSaved = onToggleBlockSaved,
+                onGrantPhoneAccess = onGrantPhoneAccess,
                 onAddPrefix = onAddPrefix,
                 onTogglePrefix = onTogglePrefix,
                 onRemovePrefix = onRemovePrefix
@@ -237,10 +358,16 @@ private fun App(
 private fun HomeTab(
     padding: PaddingValues,
     screeningEnabled: Boolean,
+    blockingOn: Boolean,
+    blockSavedOn: Boolean,
+    phoneAccessEnabled: Boolean,
     prefixInput: String,
     onPrefixInputChange: (String) -> Unit,
     rules: List<PrefixRule>,
     onEnableScreening: () -> Unit,
+    onToggleBlocking: (Boolean) -> Unit,
+    onToggleBlockSaved: (Boolean) -> Unit,
+    onGrantPhoneAccess: () -> Unit,
     onAddPrefix: () -> Unit,
     onTogglePrefix: (String, Boolean) -> Unit,
     onRemovePrefix: (String) -> Unit
@@ -294,24 +421,58 @@ private fun HomeTab(
                 modifier = Modifier
                     .size(8.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(if (screeningEnabled) On else Off)
+                    .background(if (blockingOn) On else Off)
             )
             Spacer(Modifier.width(10.dp))
             Text(
-                if (screeningEnabled) "Call screening on" else "Call screening off",
+                if (blockingOn) "Blocking on" else "Blocking off",
                 color = TextMain,
                 modifier = Modifier.weight(1f),
                 fontSize = 15.sp
             )
-            if (!screeningEnabled) {
-                Button(
-                    onClick = onEnableScreening,
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.White)
-                ) {
-                    Text("Enable")
-                }
+            Switch(
+                checked = blockingOn,
+                onCheckedChange = onToggleBlocking,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = Accent
+                )
+            )
+        }
+        if (!phoneAccessEnabled) {
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = onGrantPhoneAccess,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Surface, contentColor = Accent)
+            ) {
+                Text("Allow phone & notifications")
             }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(Surface)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Block saved numbers",
+                color = TextMain,
+                modifier = Modifier.weight(1f),
+                fontSize = 15.sp
+            )
+            Switch(
+                checked = blockSavedOn,
+                onCheckedChange = onToggleBlockSaved,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = Accent
+                )
+            )
         }
 
         Spacer(Modifier.height(14.dp))

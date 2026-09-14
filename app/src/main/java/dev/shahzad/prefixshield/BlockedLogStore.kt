@@ -22,7 +22,12 @@ class BlockedLogStore(context: android.content.Context) {
     }
 
     fun add(call: BlockedCall) {
-        val next = (list() + call)
+        val current = list()
+        val duplicate = current.any {
+            it.number == call.number && kotlin.math.abs(it.atMillis - call.atMillis) < 4000
+        }
+        if (duplicate) return
+        val next = (current + call)
             .sortedByDescending { it.atMillis }
             .take(MAX_ITEMS)
         val serialized = next.joinToString("\n") { "${it.atMillis}|${it.number}|${it.matchedPrefix}" }
@@ -36,6 +41,14 @@ class BlockedLogStore(context: android.content.Context) {
 
     fun clear() {
         prefs.edit().putString(KEY_LOG, "").commit()
+    }
+
+    fun register(listener: android.content.SharedPreferences.OnSharedPreferenceChangeListener) {
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+    }
+
+    fun unregister(listener: android.content.SharedPreferences.OnSharedPreferenceChangeListener) {
+        prefs.unregisterOnSharedPreferenceChangeListener(listener)
     }
 
     companion object {

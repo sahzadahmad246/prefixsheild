@@ -1,65 +1,99 @@
 package dev.shahzad.prefixshield
 
 object NumberMatcher {
-    fun digitsOnly(value: String): String = value.filter { it.isDigit() }
+    fun digitsOnly(value: String): String = buildString(value.length) {
+        for (ch in value) {
+            val digit = Character.digit(ch, 10)
+            if (digit >= 0) append(digit)
+        }
+    }
 
     fun extractNumber(raw: String?): String {
         if (raw.isNullOrBlank()) return ""
-        val core = raw.substringBefore("@").substringBefore(";")
+        val decoded = percentDecode(raw)
+        val core = decoded.substringBefore("@").substringBefore(";")
+            .substringAfter("tel:").substringAfter("TEL:")
         return digitsOnly(core)
     }
 
-    fun normalizePrefix(prefix: String): String = digitsOnly(prefix)
+    fun normalizePrefix(prefix: String): String = extractNumber(prefix)
 
-    fun matchingPrefix(rawNumber: String?, prefixes: List<PrefixRule>): String? {
-        val number = extractNumber(rawNumber)
-        if (number.isEmpty()) return null
-        val numberForms = variants(number, fullNumber = true)
-        return prefixes
+    fun matchingPrefix(rawNumber: String?, prefixes: List<PrefixRule>): String? =
+        matchingPrefix(listOf(rawNumber), prefixes)
+
+    fun matchingPrefix(rawNumbers: Collection<String?>, prefixes: List<PrefixRule>): String? {
+        val enabled = prefixes
             .filter { it.enabled }
             .map { normalizePrefix(it.prefix) }
-            .firstOrNull { prefix ->
-                prefix.length >= 3 && matches(numberForms, prefix)
-            }
-    }
+            .filter { it.length >= 3 }
+        if (enabled.isEmpty()) return null
 
-    private fun matches(numberForms: Set<String>, prefix: String): Boolean {
-        val prefixForms = variants(prefix, fullNumber = false)
-        return prefixForms.any { piece ->
-            piece.length >= 3 && numberForms.any { number -> number.contains(piece) }
+        val numberKeys = rawNumbers
+            .map { extractNumber(it) }
+            .filter { it.isNotEmpty() }
+            .flatMap { keys(it, isPrefix = false) }
+            .toSet()
+        if (numberKeys.isEmpty()) return null
+
+        return enabled.firstOrNull { prefix ->
+            keys(prefix, isPrefix = true).any { piece ->
+                piece.length >= 3 && numberKeys.any { number -> number.contains(piece) }
+            }
         }
     }
 
-    /**
-     * Builds forms with/without trunk 0, 00, and India +91 so a saved series
-     * still matches whether the carrier sends +91, 91, 0, or a local 10-digit number.
-     */
-    internal fun variants(digits: String, fullNumber: Boolean): Set<String> {
+    fun displayNumber(rawNumbers: Collection<String?>): String {
+        return rawNumbers
+            .map { extractNumber(it) }
+            .filter { it.isNotEmpty() }
+            .maxByOrNull { it.length }
+            ?: "Unknown"
+    }
+
+    internal fun keys(digits: String, isPrefix: Boolean): Set<String> {
         if (digits.isEmpty()) return emptySet()
         val out = linkedSetOf(digits)
 
-        fun consider(value: String) {
+        fun add(value: String) {
             if (value.isNotEmpty()) out += value
         }
 
-        if (digits.startsWith("00") && digits.length > 4) {
-            consider(digits.drop(2))
-        }
-        if (digits.startsWith("0") && digits.length > 3) {
-            consider(digits.drop(1))
-        }
-
-        val stripCountryCode = !fullNumber || digits.length >= 12
-        if (stripCountryCode && digits.startsWith("91") && digits.length > 5) {
-            consider(digits.drop(2))
-        }
-
         out.toList().forEach { form ->
-            if (form.startsWith("0") && form.length > 3) consider(form.drop(1))
-            if ((!fullNumber || form.length >= 12) && form.startsWith("91") && form.length > 5) {
-                consider(form.drop(2))
+            var current = form
+            if (current.startsWith("00") && current.length > 4) {
+                current = current.drop(2)
+                add(current)
+            }
+            if (current.startsWith("0") && current.length > 3) {
+                add(current.drop(1))
+            }
+            val stripCc = isPrefix || current.length >= 12
+            if (stripCc && current.startsWith("91") && current.length > 5) {
+                add(current.drop(2))
+            }
+            if (!isPrefix && current.length > 10) {
+                add(current.takeLast(10))
             }
         }
+
+        // Second pass so last-10 / stripped forms also lose +91 / 0
+        out.toList().forEach { form ->
+            if (form.startsWith("0") && form.length > 3) add(form.drop(1))
+            if ((isPrefix || form.length >= 12) && form.startsWith("91") && form.length > 5) {
+                add(form.drop(2))
+            }
+            if (!isPrefix && form.length > 10) add(form.takeLast(10))
+        }
         return out
+    }
+
+    private fun percentDecode(raw: String): String {
+        var value = raw
+        repeat(2) {
+            value = value
+                .replace("%2B", "+", ignoreCase = true)
+                .replace("%2b", "+")
+        }
+        return value
     }
 }
