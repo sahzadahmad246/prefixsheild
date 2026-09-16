@@ -1,0 +1,17 @@
+{
+  "name": "PrefixShield Android",
+  "install": ".cursor/cloud-agent-install.sh",
+  "start": ".cursor/cloud-agent-start.sh",
+  "terminals": [
+    {
+      "name": "ui-preview",
+      "command": "cd preview && python3 -m http.server 8765 --bind 127.0.0.1"
+    }
+  ],
+  "ports": [
+    {
+      "port": 8765,
+      "name": "UI preview"
+    }
+  ]
+}
