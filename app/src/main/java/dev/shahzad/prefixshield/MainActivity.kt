@@ -144,6 +144,7 @@ class MainActivity : ComponentActivity() {
                         PendingNotifications(this).clear()
                         BlockedNotifier.cancel(this)
                         blockedCalls = emptyList()
+                        totalBlockedCount = app.blockedLogStore.totalCount()
                     }
                 )
             }
