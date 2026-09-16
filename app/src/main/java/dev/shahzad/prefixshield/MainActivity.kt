@@ -15,6 +15,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,17 +34,22 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.CalendarToday
+import androidx.compose.material.icons.outlined.ContactPhone
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.PhoneDisabled
+import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -68,15 +74,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     private val app get() = application as PrefixShieldApp
@@ -89,6 +93,7 @@ class MainActivity : ComponentActivity() {
     private var prefixInput by mutableStateOf("")
     private var rules by mutableStateOf(listOf<PrefixRule>())
     private var blockedCalls by mutableStateOf(listOf<BlockedCall>())
+    private var totalBlockedCount by mutableIntStateOf(0)
 
     private val roleLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -122,6 +127,7 @@ class MainActivity : ComponentActivity() {
                     onPrefixInputChange = { prefixInput = it },
                     rules = rules,
                     blockedCalls = blockedCalls,
+                    totalBlockedCount = totalBlockedCount,
                     onEnableScreening = ::requestCallScreeningRole,
                     onToggleBlocking = ::toggleBlocking,
                     onToggleBlockSaved = ::toggleBlockSaved,
@@ -138,6 +144,7 @@ class MainActivity : ComponentActivity() {
                         PendingNotifications(this).clear()
                         BlockedNotifier.cancel(this)
                         blockedCalls = emptyList()
+                        totalBlockedCount = app.blockedLogStore.totalCount()
                     }
                 )
             }
@@ -167,6 +174,7 @@ class MainActivity : ComponentActivity() {
         phoneAccessEnabled = hasPhoneAccess()
         rules = app.prefixStore.list()
         blockedCalls = app.blockedLogStore.list()
+        totalBlockedCount = app.blockedLogStore.totalCount()
     }
 
     private fun addPrefix() {
@@ -287,6 +295,7 @@ private fun App(
     onPrefixInputChange: (String) -> Unit,
     rules: List<PrefixRule>,
     blockedCalls: List<BlockedCall>,
+    totalBlockedCount: Int,
     onEnableScreening: () -> Unit,
     onToggleBlocking: (Boolean) -> Unit,
     onToggleBlockSaved: (Boolean) -> Unit,
@@ -336,6 +345,7 @@ private fun App(
                 prefixInput = prefixInput,
                 onPrefixInputChange = onPrefixInputChange,
                 rules = rules,
+                totalBlockedCount = totalBlockedCount,
                 onEnableScreening = onEnableScreening,
                 onToggleBlocking = onToggleBlocking,
                 onToggleBlockSaved = onToggleBlockSaved,
@@ -364,6 +374,7 @@ private fun HomeTab(
     prefixInput: String,
     onPrefixInputChange: (String) -> Unit,
     rules: List<PrefixRule>,
+    totalBlockedCount: Int,
     onEnableScreening: () -> Unit,
     onToggleBlocking: (Boolean) -> Unit,
     onToggleBlockSaved: (Boolean) -> Unit,
@@ -374,164 +385,234 @@ private fun HomeTab(
 ) {
     val focus = LocalFocusManager.current
     var pendingDelete by remember { mutableStateOf<PrefixRule?>(null) }
+    val activeRules = rules.count { it.enabled }
 
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(padding)
-            .padding(horizontal = 20.dp)
+            .padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Spacer(Modifier.height(18.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Accent),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Shield,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(22.dp)
-                )
+        item {
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Accent),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Shield,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "PrefixShield",
+                        color = TextMain,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = (-0.3).sp
+                    )
+                    Text(
+                        "Call screening & prefix blocking",
+                        color = TextDim,
+                        fontSize = 13.sp
+                    )
+                }
             }
-            Spacer(Modifier.width(12.dp))
-            Text(
-                "PrefixShield",
-                color = TextMain,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = (-0.3).sp
-            )
         }
 
-        Spacer(Modifier.height(18.dp))
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(Surface)
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
+        item {
+            Column(
                 modifier = Modifier
-                    .size(8.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (blockingOn) On else Off)
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                if (blockingOn) "Blocking on" else "Blocking off",
-                color = TextMain,
-                modifier = Modifier.weight(1f),
-                fontSize = 15.sp
-            )
-            Switch(
-                checked = blockingOn,
-                onCheckedChange = onToggleBlocking,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = Accent
-                )
-            )
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Surface)
+                    .border(1.dp, if (blockingOn) On.copy(alpha = 0.35f) else Line, RoundedCornerShape(18.dp))
+                    .padding(16.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (blockingOn) On.copy(alpha = 0.15f) else Off.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Security,
+                            contentDescription = null,
+                            tint = if (blockingOn) On else Off,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            if (blockingOn) "Protection active" else "Protection paused",
+                            color = TextMain,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            when {
+                                !screeningEnabled -> "Enable call screening to start blocking"
+                                blockingOn -> "$activeRules active series · $totalBlockedCount blocked total"
+                                else -> "Screening on, blocking toggled off"
+                            },
+                            color = TextDim,
+                            fontSize = 13.sp
+                        )
+                    }
+                    Switch(
+                        checked = blockingOn,
+                        onCheckedChange = onToggleBlocking,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Accent
+                        )
+                    )
+                }
+                if (!screeningEnabled) {
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        onClick = onEnableScreening,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.White)
+                    ) {
+                        Icon(Icons.Outlined.Shield, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Enable call screening")
+                    }
+                }
+            }
         }
+
         if (!phoneAccessEnabled) {
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = onGrantPhoneAccess,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = Surface, contentColor = Accent)
-            ) {
-                Text("Allow phone & notifications")
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF1A2030))
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Outlined.Notifications, contentDescription = null, tint = Accent)
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Phone access needed", color = TextMain, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text("Contacts, call log & alerts", color = TextDim, fontSize = 12.sp)
+                    }
+                    TextButton(onClick = onGrantPhoneAccess) {
+                        Text("Allow", color = Accent)
+                    }
+                }
             }
         }
 
-        Spacer(Modifier.height(8.dp))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(Surface)
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                "Block saved numbers",
-                color = TextMain,
-                modifier = Modifier.weight(1f),
-                fontSize = 15.sp
-            )
-            Switch(
+        item {
+            SettingToggleCard(
+                title = "Block saved contacts",
+                subtitle = "Reject numbers already in your address book",
+                icon = Icons.Outlined.ContactPhone,
                 checked = blockSavedOn,
-                onCheckedChange = onToggleBlockSaved,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = Accent
-                )
+                onCheckedChange = onToggleBlockSaved
             )
         }
 
-        Spacer(Modifier.height(14.dp))
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(Surface)
-                .padding(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedTextField(
-                value = prefixInput,
-                onValueChange = onPrefixInputChange,
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                placeholder = { Text("Series") },
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Phone,
-                    imeAction = ImeAction.Done
-                ),
-                keyboardActions = KeyboardActions(onDone = {
-                    onAddPrefix()
-                    focus.clearFocus()
-                }),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Accent,
-                    unfocusedBorderColor = Color.Transparent,
-                    focusedContainerColor = Bg,
-                    unfocusedContainerColor = Bg,
-                    focusedTextColor = TextMain,
-                    unfocusedTextColor = TextMain,
-                    cursorColor = Accent,
-                    focusedPlaceholderColor = TextDim,
-                    unfocusedPlaceholderColor = TextDim
-                ),
-                shape = RoundedCornerShape(12.dp)
+        item {
+            Text(
+                "Number series",
+                color = TextMain,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 4.dp)
             )
-            Spacer(Modifier.width(8.dp))
-            Button(
-                onClick = {
-                    onAddPrefix()
-                    focus.clearFocus()
-                },
-                modifier = Modifier.height(56.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.White)
+            Text(
+                "Calls starting with these digits are screened",
+                color = TextDim,
+                fontSize = 12.sp
+            )
+        }
+
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Surface)
+                    .padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Add")
+                OutlinedTextField(
+                    value = prefixInput,
+                    onValueChange = onPrefixInputChange,
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    leadingIcon = {
+                        Icon(Icons.Outlined.Tag, contentDescription = null, tint = TextDim)
+                    },
+                    placeholder = { Text("e.g. 0300") },
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Phone,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(onDone = {
+                        onAddPrefix()
+                        focus.clearFocus()
+                    }),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Accent,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedContainerColor = Bg,
+                        unfocusedContainerColor = Bg,
+                        focusedTextColor = TextMain,
+                        unfocusedTextColor = TextMain,
+                        cursorColor = Accent,
+                        focusedPlaceholderColor = TextDim,
+                        unfocusedPlaceholderColor = TextDim
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    onClick = {
+                        onAddPrefix()
+                        focus.clearFocus()
+                    },
+                    modifier = Modifier.height(56.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.White)
+                ) {
+                    Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(20.dp))
+                }
             }
         }
 
-        Spacer(Modifier.height(14.dp))
-
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
+        if (rules.isEmpty()) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(Icons.Outlined.Tag, contentDescription = null, tint = TextDim, modifier = Modifier.size(40.dp))
+                    Spacer(Modifier.height(8.dp))
+                    Text("No series yet", color = TextMain, fontWeight = FontWeight.Medium)
+                    Text("Add a prefix to block matching callers", color = TextDim, fontSize = 13.sp)
+                }
+            }
+        } else {
             items(rules, key = { it.prefix }) { rule ->
                 PrefixRow(
                     rule = rule,
@@ -540,6 +621,7 @@ private fun HomeTab(
                 )
             }
         }
+        item { Spacer(Modifier.height(8.dp)) }
     }
 
     pendingDelete?.let { rule ->
@@ -577,16 +659,37 @@ private fun PrefixRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(Surface)
-            .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+            .padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            rule.prefix,
-            color = if (rule.enabled) TextMain else TextDim,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f)
-        )
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(if (rule.enabled) Accent.copy(alpha = 0.18f) else Color(0xFF1E2430)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Outlined.Tag,
+                contentDescription = null,
+                tint = if (rule.enabled) Accent else TextDim,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                rule.prefix,
+                color = if (rule.enabled) TextMain else TextDim,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                if (rule.enabled) "Active" else "Paused",
+                color = TextDim,
+                fontSize = 12.sp
+            )
+        }
         Box {
             IconButton(onClick = { menuOpen = true }) {
                 Icon(Icons.Outlined.MoreVert, contentDescription = "More", tint = TextDim)
@@ -641,11 +744,55 @@ private fun PrefixRow(
 }
 
 @Composable
+private fun SettingToggleCard(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Surface)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Accent.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = Accent, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(subtitle, color = TextDim, fontSize = 12.sp)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Accent
+            )
+        )
+    }
+}
+
+@Composable
 private fun BlockedTab(
     padding: PaddingValues,
     blockedCalls: List<BlockedCall>,
     onClearLog: () -> Unit
 ) {
+    val entries = remember(blockedCalls) { BlockedTimeFormat.buildListEntries(blockedCalls) }
+    val nowMillis = remember { System.currentTimeMillis() }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -654,16 +801,24 @@ private fun BlockedTab(
     ) {
         Spacer(Modifier.height(18.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "Blocked",
-                color = TextMain,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f)
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Blocked",
+                    color = TextMain,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                if (blockedCalls.isNotEmpty()) {
+                    Text(
+                        "${blockedCalls.size} in log",
+                        color = TextDim,
+                        fontSize = 13.sp
+                    )
+                }
+            }
             if (blockedCalls.isNotEmpty()) {
                 TextButton(onClick = onClearLog) {
-                    Text("Clear", color = Accent)
+                    Text("Clear log", color = Accent)
                 }
             }
         }
@@ -674,42 +829,117 @@ private fun BlockedTab(
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(
-                    imageVector = Icons.Outlined.PhoneDisabled,
-                    contentDescription = null,
-                    tint = TextDim,
-                    modifier = Modifier.size(48.dp)
-                )
-                Spacer(Modifier.height(12.dp))
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Surface),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.PhoneDisabled,
+                        contentDescription = null,
+                        tint = TextDim,
+                        modifier = Modifier.size(36.dp)
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
                 Text("No blocked calls", color = TextMain, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.height(4.dp))
-                Text("They’ll show up here", color = TextDim, fontSize = 13.sp)
+                Text("Blocked numbers appear here with time", color = TextDim, fontSize = 13.sp)
             }
         } else {
-            Spacer(Modifier.height(8.dp))
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(blockedCalls, key = { "${it.atMillis}-${it.number}" }) { call ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            call.number,
-                            color = TextMain,
-                            fontSize = 16.sp,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(formatTime(call.atMillis), color = TextDim, fontSize = 13.sp)
+            Spacer(Modifier.height(12.dp))
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(
+                    entries,
+                    key = { entry ->
+                        when (entry) {
+                            is BlockedListEntry.Header -> "h-${entry.label}"
+                            is BlockedListEntry.Item -> "${entry.call.atMillis}-${entry.call.number}"
+                        }
                     }
-                    HorizontalDivider(color = Line)
+                ) { entry ->
+                    when (entry) {
+                        is BlockedListEntry.Header -> BlockedDayHeader(entry.label)
+                        is BlockedListEntry.Item -> BlockedCallRow(entry.call, nowMillis)
+                    }
                 }
             }
         }
     }
 }
 
-private fun formatTime(atMillis: Long): String {
-    return SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(atMillis))
+@Composable
+private fun BlockedDayHeader(label: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            Icons.Outlined.CalendarToday,
+            contentDescription = null,
+            tint = Accent,
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            label,
+            color = TextMain,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
+private fun BlockedCallRow(call: BlockedCall, nowMillis: Long) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Surface)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Off.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Outlined.PhoneDisabled,
+                contentDescription = null,
+                tint = Off,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                call.number,
+                color = TextMain,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                "Matched ${call.matchedPrefix}",
+                color = TextDim,
+                fontSize = 12.sp
+            )
+        }
+        Text(
+            BlockedTimeFormat.formatBlockedAt(call.atMillis, nowMillis),
+            color = TextDim,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium
+        )
+    }
 }
