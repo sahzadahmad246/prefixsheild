@@ -39,9 +39,31 @@ class BlockedLogStore(context: android.content.Context) {
 
     fun totalCount(): Int = prefs.getInt(KEY_COUNT, 0)
 
-    fun clear() {
-        prefs.edit().putString(KEY_LOG, "").commit()
+    fun remove(call: BlockedCall) {
+        val updated = list().filterNot {
+            it.atMillis == call.atMillis && it.number == call.number
+        }
+        prefs.edit().putString(KEY_LOG, serialize(updated)).commit()
     }
+
+    fun removeMatching(number: String, atMillis: Long) {
+        val digits = NumberMatcher.extractNumber(number)
+        val updated = list().filterNot {
+            kotlin.math.abs(it.atMillis - atMillis) < 12_000 &&
+                NumberMatcher.extractNumber(it.number) == digits
+        }
+        prefs.edit().putString(KEY_LOG, serialize(updated)).commit()
+    }
+
+    fun clear() {
+        prefs.edit()
+            .putString(KEY_LOG, "")
+            .putInt(KEY_COUNT, 0)
+            .commit()
+    }
+
+    private fun serialize(calls: List<BlockedCall>): String =
+        calls.joinToString("\n") { "${it.atMillis}|${it.number}|${it.matchedPrefix}" }
 
     fun register(listener: android.content.SharedPreferences.OnSharedPreferenceChangeListener) {
         prefs.registerOnSharedPreferenceChangeListener(listener)

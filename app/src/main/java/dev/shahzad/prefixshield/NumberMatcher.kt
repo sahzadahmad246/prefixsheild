@@ -37,7 +37,7 @@ object NumberMatcher {
 
         return enabled.firstOrNull { prefix ->
             keys(prefix, isPrefix = true).any { piece ->
-                piece.length >= 3 && numberKeys.any { number -> number.contains(piece) }
+                piece.length >= 3 && numberKeys.any { number -> number.startsWith(piece) }
             }
         }
     }

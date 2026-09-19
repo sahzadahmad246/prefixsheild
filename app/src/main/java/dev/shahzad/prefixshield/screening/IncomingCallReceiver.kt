@@ -24,6 +24,7 @@ class IncomingCallReceiver : BroadcastReceiver() {
         if (state != TelephonyManager.EXTRA_STATE_RINGING) return
 
         if (!BlockSettings(context).isBlockingEnabled()) return
+        if (dev.shahzad.prefixshield.incall.CallSession.service != null) return
 
         val number = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER)
             ?: intent.getStringExtra("incoming_number")

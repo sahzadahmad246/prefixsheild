@@ -7,9 +7,9 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
-sealed class BlockedListEntry {
-    data class Header(val label: String) : BlockedListEntry()
-    data class Item(val call: BlockedCall) : BlockedListEntry()
+sealed class DayListEntry<out T> {
+    data class Header(val label: String) : DayListEntry<Nothing>()
+    data class Item<T>(val value: T) : DayListEntry<T>()
 }
 
 object BlockedTimeFormat {
@@ -30,7 +30,7 @@ object BlockedTimeFormat {
         if (elapsedMinutes < 60 && callDate == nowDate) {
             return when {
                 elapsedMs < TimeUnit.MINUTES.toMillis(1) -> "Just now"
-                elapsedMinutes < 1 -> "1 min ago"
+                elapsedMinutes == 1L -> "1 min ago"
                 else -> "$elapsedMinutes min ago"
             }
         }
@@ -55,19 +55,27 @@ object BlockedTimeFormat {
         calls: List<BlockedCall>,
         nowMillis: Long = System.currentTimeMillis(),
         zoneId: ZoneId = ZoneId.systemDefault()
-    ): List<BlockedListEntry> {
-        if (calls.isEmpty()) return emptyList()
-        val today = Instant.ofEpochMilli(nowMillis).atZone(zoneId).toLocalDate()
-        val entries = mutableListOf<BlockedListEntry>()
-        var lastDay: LocalDate? = null
+    ): List<DayListEntry<BlockedCall>> {
+        return groupByDay(calls, { it.atMillis }, nowMillis, zoneId)
+    }
 
-        for (call in calls) {
-            val day = Instant.ofEpochMilli(call.atMillis).atZone(zoneId).toLocalDate()
+    fun <T> groupByDay(
+        items: List<T>,
+        timeOf: (T) -> Long,
+        nowMillis: Long = System.currentTimeMillis(),
+        zoneId: ZoneId = ZoneId.systemDefault()
+    ): List<DayListEntry<T>> {
+        if (items.isEmpty()) return emptyList()
+        val today = Instant.ofEpochMilli(nowMillis).atZone(zoneId).toLocalDate()
+        val entries = mutableListOf<DayListEntry<T>>()
+        var lastDay: LocalDate? = null
+        for (item in items.sortedByDescending(timeOf)) {
+            val day = Instant.ofEpochMilli(timeOf(item)).atZone(zoneId).toLocalDate()
             if (day != lastDay) {
-                entries += BlockedListEntry.Header(sectionLabel(day, today))
+                entries += DayListEntry.Header(sectionLabel(day, today))
                 lastDay = day
             }
-            entries += BlockedListEntry.Item(call)
+            entries += DayListEntry.Item(item)
         }
         return entries
     }

@@ -15,8 +15,17 @@ class BlockSettings(context: android.content.Context) {
         prefs.edit().putBoolean(KEY_SAVED, enabled).commit()
     }
 
+    fun shouldPromptDialer(): Boolean {
+        return System.currentTimeMillis() >= prefs.getLong(KEY_DIALER_SNOOZE, 0L)
+    }
+
+    fun snoozeDialerPrompt() {
+        prefs.edit().putLong(KEY_DIALER_SNOOZE, System.currentTimeMillis() + 4L * 60L * 60L * 1000L).commit()
+    }
+
     companion object {
         private const val KEY_ENABLED = "blocking_enabled"
         private const val KEY_SAVED = "block_saved_numbers"
+        private const val KEY_DIALER_SNOOZE = "dialer_snooze"
     }
 }

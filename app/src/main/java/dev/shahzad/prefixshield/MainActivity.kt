@@ -1,125 +1,133 @@
 package dev.shahzad.prefixshield
 
 import android.Manifest
+import android.app.Activity
 import android.app.role.RoleManager
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.SharedPreferences
 import android.net.Uri
+import android.database.ContentObserver
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.provider.CallLog
+import android.provider.ContactsContract
 import android.provider.Settings
+import android.speech.RecognizerIntent
+import android.telecom.TelecomManager
+import android.telecom.VideoProfile
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.CalendarToday
-import androidx.compose.material.icons.outlined.ContactPhone
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.PhoneDisabled
-import androidx.compose.material.icons.outlined.Security
-import androidx.compose.material.icons.outlined.Shield
-import androidx.compose.material.icons.outlined.Tag
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     private val app get() = application as PrefixShieldApp
 
     private var screeningEnabled by mutableStateOf(false)
+    private var dialerEnabled by mutableStateOf(false)
     private var blockingOn by mutableStateOf(true)
     private var blockSavedOn by mutableStateOf(true)
     private var phoneAccessEnabled by mutableStateOf(false)
+    private var canReadCallLog by mutableStateOf(false)
+    private var canReadContacts by mutableStateOf(false)
+    private var promptDefaultDialer by mutableStateOf(false)
+    private var contacts by mutableStateOf(listOf<DeviceContact>())
+    private var contactAccounts by mutableStateOf(listOf<ContactAccount>())
     private var requestedPermsOnce = false
     private var prefixInput by mutableStateOf("")
     private var rules by mutableStateOf(listOf<PrefixRule>())
     private var blockedCalls by mutableStateOf(listOf<BlockedCall>())
+    private var phoneLogs by mutableStateOf(listOf<PhoneLogEntry>())
     private var totalBlockedCount by mutableIntStateOf(0)
+    private var spokenQuery by mutableStateOf("")
+    private var pendingCallNumber: String? = null
+    private var pendingDialDigits by mutableStateOf("")
+    private var requestingDialerRole = false
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val refreshDebounced = Runnable { refresh() }
 
     private val roleLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) {
+    ) { result ->
         refresh()
-        if (isCallScreeningHeld()) {
+        if (isDialerHeld()) {
+            requestingDialerRole = false
+            Toast.makeText(this, "Default phone app on", Toast.LENGTH_SHORT).show()
+        } else if (requestingDialerRole) {
+            requestingDialerRole = false
+            if (result.resultCode != Activity.RESULT_OK) {
+                openDialerFallback()
+            }
+        } else if (isCallScreeningHeld()) {
             Toast.makeText(this, "Screening on", Toast.LENGTH_SHORT).show()
         }
     }
 
     private val logListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-        runOnUiThread { refresh() }
+        scheduleRefresh()
+    }
+
+    private val callLogObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) {
+            scheduleRefresh()
+        }
     }
 
     private val permLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { refresh() }
 
+    private val callPermLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val number = pendingCallNumber
+        pendingCallNumber = null
+        if (number != null) placeCall(number, granted)
+    }
+
+    private val micPermLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) launchVoiceSearch()
+        else Toast.makeText(this, "Mic permission needed", Toast.LENGTH_SHORT).show()
+    }
+
+    private val speechLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val spoken = result.data
+            ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            ?.firstOrNull()
+            ?.trim()
+            .orEmpty()
+        if (spoken.isNotEmpty()) spokenQuery = spoken
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         refresh()
+        consumeTelIntent(intent)
         app.blockedLogStore.register(logListener)
+        contentResolver.registerContentObserver(CallLog.Calls.CONTENT_URI, true, callLogObserver)
+        contentResolver.registerContentObserver(ContactsContract.Contacts.CONTENT_URI, true, callLogObserver)
         setContent {
             MaterialTheme(colorScheme = appColors) {
-                App(
+                DialerApp(
                     screeningEnabled = screeningEnabled,
+                    dialerEnabled = dialerEnabled,
                     blockingOn = blockingOn,
                     blockSavedOn = blockSavedOn,
                     phoneAccessEnabled = phoneAccessEnabled,
@@ -127,24 +135,43 @@ class MainActivity : ComponentActivity() {
                     onPrefixInputChange = { prefixInput = it },
                     rules = rules,
                     blockedCalls = blockedCalls,
+                    phoneLogs = phoneLogs,
+                    contacts = contacts,
+                    contactAccounts = contactAccounts,
+                    canReadCallLog = canReadCallLog,
+                    canReadContacts = canReadContacts,
+                    promptDefaultDialer = promptDefaultDialer,
                     totalBlockedCount = totalBlockedCount,
+                    spokenQuery = spokenQuery,
+                    pendingDialDigits = pendingDialDigits,
+                    onPendingDialConsumed = { pendingDialDigits = "" },
+                    onSpokenQueryConsumed = { spokenQuery = "" },
                     onEnableScreening = ::requestCallScreeningRole,
+                    onEnableDialer = ::requestDialerRole,
+                    onSnoozeDialerPrompt = {
+                        BlockSettings(this).snoozeDialerPrompt()
+                        promptDefaultDialer = false
+                    },
                     onToggleBlocking = ::toggleBlocking,
                     onToggleBlockSaved = ::toggleBlockSaved,
                     onGrantPhoneAccess = ::requestPhoneAccess,
+                    onVoiceSearch = ::requestVoiceSearch,
+                    onPlaceCall = ::requestPlaceCall,
+                    onCopyNumber = ::copyNumber,
+                    onBlockNumber = ::blockNumber,
+                    onUnblockNumber = ::unblockNumber,
+                    onDeleteLog = ::deleteLog,
+                    onClearHistory = ::clearHistory,
+                    onSaveContact = ::saveContact,
+                    onUpdateContact = ::updateContact,
+                    onDeleteContact = ::deleteContact,
+                    onToggleContactStar = ::toggleContactStar,
                     onAddPrefix = ::addPrefix,
                     onTogglePrefix = { prefix, enabled ->
                         rules = app.prefixStore.toggle(prefix, enabled)
                     },
                     onRemovePrefix = { prefix ->
                         rules = app.prefixStore.remove(prefix)
-                    },
-                    onClearLog = {
-                        app.blockedLogStore.clear()
-                        PendingNotifications(this).clear()
-                        BlockedNotifier.cancel(this)
-                        blockedCalls = emptyList()
-                        totalBlockedCount = app.blockedLogStore.totalCount()
                     }
                 )
             }
@@ -153,7 +180,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         clearUnseenNotes()
+        consumeTelIntent(intent)
     }
 
     override fun onResume() {
@@ -163,17 +192,33 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacks(refreshDebounced)
         app.blockedLogStore.unregister(logListener)
+        contentResolver.unregisterContentObserver(callLogObserver)
         super.onDestroy()
+    }
+
+    private fun scheduleRefresh() {
+        mainHandler.removeCallbacks(refreshDebounced)
+        mainHandler.postDelayed(refreshDebounced, 300)
     }
 
     private fun refresh() {
         screeningEnabled = isCallScreeningHeld()
-        blockingOn = screeningEnabled && BlockSettings(this).isBlockingEnabled()
+        dialerEnabled = isDialerHeld()
+        blockingOn = BlockSettings(this).isBlockingEnabled()
         blockSavedOn = BlockSettings(this).blockSavedNumbers()
         phoneAccessEnabled = hasPhoneAccess()
+        canReadCallLog = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) ==
+            PackageManager.PERMISSION_GRANTED
         rules = app.prefixStore.list()
         blockedCalls = app.blockedLogStore.list()
+        phoneLogs = PhoneLogStore.list(this)
+        contacts = ContactStore.list(this)
+        contactAccounts = ContactStore.accounts(this)
+        canReadContacts = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) ==
+            PackageManager.PERMISSION_GRANTED
+        promptDefaultDialer = !dialerEnabled && BlockSettings(this).shouldPromptDialer()
         totalBlockedCount = app.blockedLogStore.totalCount()
     }
 
@@ -184,6 +229,58 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) {
             Toast.makeText(this, "Need 3+ digits", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun isDialerHeld(): Boolean {
+        val roleManager = getSystemService(RoleManager::class.java)
+        return roleManager.isRoleHeld(RoleManager.ROLE_DIALER)
+    }
+
+    private fun requestDialerRole() {
+        val roleManager = getSystemService(RoleManager::class.java)
+        if (roleManager.isRoleHeld(RoleManager.ROLE_DIALER)) {
+            Toast.makeText(this, "Already the default phone app", Toast.LENGTH_SHORT).show()
+            return
+        }
+        requestPhoneAccess()
+        if (!roleManager.isRoleAvailable(RoleManager.ROLE_DIALER)) {
+            openDialerFallback()
+            return
+        }
+        requestingDialerRole = true
+        try {
+            roleLauncher.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_DIALER))
+        } catch (_: Exception) {
+            requestingDialerRole = false
+            openDialerFallback()
+        }
+    }
+
+    private fun openDialerFallback() {
+        try {
+            startActivity(
+                Intent(TelecomManager.ACTION_CHANGE_DEFAULT_DIALER).putExtra(
+                    TelecomManager.EXTRA_CHANGE_DEFAULT_DIALER_PACKAGE_NAME,
+                    packageName
+                )
+            )
+            return
+        } catch (_: Exception) {
+        }
+        try {
+            startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
+        } catch (_: Exception) {
+            startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", packageName, null)
+                }
+            )
+        }
+        Toast.makeText(
+            this,
+            "If it was denied, App info → ⋮ → Allow restricted settings",
+            Toast.LENGTH_LONG
+        ).show()
     }
 
     private fun isCallScreeningHeld(): Boolean {
@@ -205,7 +302,7 @@ class MainActivity : ComponentActivity() {
     private fun toggleBlocking(enabled: Boolean) {
         if (enabled) {
             BlockSettings(this).setBlockingEnabled(true)
-            if (!isCallScreeningHeld()) {
+            if (!isCallScreeningHeld() && !isDialerHeld()) {
                 requestCallScreeningRole()
             } else {
                 refresh()
@@ -219,6 +316,144 @@ class MainActivity : ComponentActivity() {
     private fun toggleBlockSaved(enabled: Boolean) {
         BlockSettings(this).setBlockSavedNumbers(enabled)
         if (enabled) requestPhoneAccess()
+        refresh()
+    }
+
+    private fun requestPlaceCall(number: String) {
+        val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            placeCall(number, true)
+        } else {
+            pendingCallNumber = number
+            callPermLauncher.launch(Manifest.permission.CALL_PHONE)
+        }
+    }
+
+    private fun consumeTelIntent(intent: Intent?) {
+        val data = intent?.data ?: return
+        if (data.scheme.equals("tel", ignoreCase = true)) {
+            val number = data.schemeSpecificPart.orEmpty()
+            if (number.isBlank()) return
+            if (intent.action == Intent.ACTION_CALL) {
+                requestPlaceCall(number)
+            } else {
+                pendingDialDigits = number
+            }
+        }
+    }
+
+    private fun placeCall(number: String, canCall: Boolean) {
+        val digits = NumberMatcher.extractNumber(number).ifBlank {
+            number.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }
+        }
+        if (digits.isBlank()) {
+            Toast.makeText(this, "No number to call", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (isDialerHeld()) {
+            try {
+                val telecom = getSystemService(TelecomManager::class.java)
+                val extras = Bundle().apply {
+                    putInt(TelecomManager.EXTRA_START_CALL_WITH_VIDEO_STATE, VideoProfile.STATE_AUDIO_ONLY)
+                }
+                telecom.placeCall(Uri.fromParts("tel", digits, null), extras)
+                return
+            } catch (_: Exception) {
+            }
+        }
+        val action = if (canCall) Intent.ACTION_CALL else Intent.ACTION_DIAL
+        try {
+            startActivity(Intent(action, Uri.parse("tel:$digits")))
+        } catch (_: Exception) {
+            try {
+                startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$digits")))
+            } catch (_: Exception) {
+                Toast.makeText(this, "No phone app found", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun requestVoiceSearch() {
+        val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) launchVoiceSearch() else micPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    private fun launchVoiceSearch() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Search calls")
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        }
+        try {
+            speechLauncher.launch(intent)
+        } catch (_: Exception) {
+            Toast.makeText(this, "Voice search not available", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun copyNumber(number: String) {
+        val text = number.ifBlank { return }
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        clipboard.setPrimaryClip(ClipData.newPlainText("number", text))
+        Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun blockNumber(number: String) {
+        try {
+            rules = app.prefixStore.add(number)
+            Toast.makeText(this, "Blocked series added", Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {
+            Toast.makeText(this, "Need 3+ digits to block", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun unblockNumber(number: String) {
+        val matched = NumberMatcher.matchingPrefix(number, rules)
+        if (matched == null) {
+            Toast.makeText(this, "No matching series", Toast.LENGTH_SHORT).show()
+            return
+        }
+        rules = app.prefixStore.remove(matched)
+        Toast.makeText(this, "Unblocked $matched", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun saveContact(name: String, number: String, account: ContactAccount) {
+        val ok = ContactStore.insert(this, name, number, account)
+        Toast.makeText(this, if (ok) "Contact saved" else "Could not save contact", Toast.LENGTH_SHORT).show()
+        refresh()
+    }
+
+    private fun updateContact(contact: DeviceContact, name: String, number: String) {
+        val ok = ContactStore.update(this, contact.contactId, name, number)
+        Toast.makeText(this, if (ok) "Contact updated" else "Could not update", Toast.LENGTH_SHORT).show()
+        refresh()
+    }
+
+    private fun deleteContact(contact: DeviceContact) {
+        val ok = ContactStore.delete(this, contact.contactId)
+        Toast.makeText(this, if (ok) "Contact deleted" else "Could not delete", Toast.LENGTH_SHORT).show()
+        refresh()
+    }
+
+    private fun toggleContactStar(contact: DeviceContact) {
+        ContactStore.setStarred(this, contact.contactId, !contact.starred)
+        refresh()
+    }
+
+    private fun deleteLog(entry: DialLogEntry) {
+        entry.callLogId?.let { PhoneLogStore.delete(this, it) }
+        app.blockedLogStore.removeMatching(entry.number, entry.atMillis)
+        refresh()
+    }
+
+    private fun clearHistory() {
+        PhoneLogStore.clear(this)
+        app.blockedLogStore.clear()
+        PendingNotifications(this).clear()
+        BlockedNotifier.cancel(this)
         refresh()
     }
 
@@ -257,689 +492,17 @@ class MainActivity : ComponentActivity() {
         val perms = mutableListOf(
             Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.READ_CALL_LOG,
+            Manifest.permission.WRITE_CALL_LOG,
             Manifest.permission.READ_CONTACTS,
-            Manifest.permission.ANSWER_PHONE_CALLS
+            Manifest.permission.WRITE_CONTACTS,
+            Manifest.permission.GET_ACCOUNTS,
+            Manifest.permission.ANSWER_PHONE_CALLS,
+            Manifest.permission.CALL_PHONE,
+            Manifest.permission.READ_PHONE_NUMBERS
         )
         if (Build.VERSION.SDK_INT >= 33) {
             perms += Manifest.permission.POST_NOTIFICATIONS
         }
         return perms.toTypedArray()
-    }
-}
-
-private val Bg = Color(0xFF0B0D10)
-private val Surface = Color(0xFF15181E)
-private val Line = Color(0xFF2A303A)
-private val TextMain = Color(0xFFF2F4F7)
-private val TextDim = Color(0xFF8B93A1)
-private val Accent = Color(0xFF6B8CFF)
-private val On = Color(0xFF3DDC84)
-private val Off = Color(0xFFFF6B6B)
-
-private val appColors = darkColorScheme(
-    primary = Accent,
-    onPrimary = Color.White,
-    background = Bg,
-    surface = Surface,
-    onBackground = TextMain,
-    onSurface = TextMain
-)
-
-@Composable
-private fun App(
-    screeningEnabled: Boolean,
-    blockingOn: Boolean,
-    blockSavedOn: Boolean,
-    phoneAccessEnabled: Boolean,
-    prefixInput: String,
-    onPrefixInputChange: (String) -> Unit,
-    rules: List<PrefixRule>,
-    blockedCalls: List<BlockedCall>,
-    totalBlockedCount: Int,
-    onEnableScreening: () -> Unit,
-    onToggleBlocking: (Boolean) -> Unit,
-    onToggleBlockSaved: (Boolean) -> Unit,
-    onGrantPhoneAccess: () -> Unit,
-    onAddPrefix: () -> Unit,
-    onTogglePrefix: (String, Boolean) -> Unit,
-    onRemovePrefix: (String) -> Unit,
-    onClearLog: () -> Unit
-) {
-    var tab by remember { mutableIntStateOf(0) }
-    val navColors = NavigationBarItemDefaults.colors(
-        selectedIconColor = Accent,
-        selectedTextColor = Accent,
-        unselectedIconColor = TextDim,
-        unselectedTextColor = TextDim,
-        indicatorColor = Color(0xFF1E2430)
-    )
-
-    Scaffold(
-        containerColor = Bg,
-        bottomBar = {
-            NavigationBar(containerColor = Surface, contentColor = TextMain) {
-                NavigationBarItem(
-                    selected = tab == 0,
-                    onClick = { tab = 0 },
-                    icon = { Icon(Icons.Outlined.Home, contentDescription = null) },
-                    label = { Text("Home") },
-                    colors = navColors
-                )
-                NavigationBarItem(
-                    selected = tab == 1,
-                    onClick = { tab = 1 },
-                    icon = { Icon(Icons.Outlined.PhoneDisabled, contentDescription = null) },
-                    label = { Text("Blocked") },
-                    colors = navColors
-                )
-            }
-        }
-    ) { padding ->
-        if (tab == 0) {
-            HomeTab(
-                padding = padding,
-                screeningEnabled = screeningEnabled,
-                blockingOn = blockingOn,
-                blockSavedOn = blockSavedOn,
-                phoneAccessEnabled = phoneAccessEnabled,
-                prefixInput = prefixInput,
-                onPrefixInputChange = onPrefixInputChange,
-                rules = rules,
-                totalBlockedCount = totalBlockedCount,
-                onEnableScreening = onEnableScreening,
-                onToggleBlocking = onToggleBlocking,
-                onToggleBlockSaved = onToggleBlockSaved,
-                onGrantPhoneAccess = onGrantPhoneAccess,
-                onAddPrefix = onAddPrefix,
-                onTogglePrefix = onTogglePrefix,
-                onRemovePrefix = onRemovePrefix
-            )
-        } else {
-            BlockedTab(
-                padding = padding,
-                blockedCalls = blockedCalls,
-                onClearLog = onClearLog
-            )
-        }
-    }
-}
-
-@Composable
-private fun HomeTab(
-    padding: PaddingValues,
-    screeningEnabled: Boolean,
-    blockingOn: Boolean,
-    blockSavedOn: Boolean,
-    phoneAccessEnabled: Boolean,
-    prefixInput: String,
-    onPrefixInputChange: (String) -> Unit,
-    rules: List<PrefixRule>,
-    totalBlockedCount: Int,
-    onEnableScreening: () -> Unit,
-    onToggleBlocking: (Boolean) -> Unit,
-    onToggleBlockSaved: (Boolean) -> Unit,
-    onGrantPhoneAccess: () -> Unit,
-    onAddPrefix: () -> Unit,
-    onTogglePrefix: (String, Boolean) -> Unit,
-    onRemovePrefix: (String) -> Unit
-) {
-    val focus = LocalFocusManager.current
-    var pendingDelete by remember { mutableStateOf<PrefixRule?>(null) }
-    val activeRules = rules.count { it.enabled }
-
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(padding)
-            .padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        item {
-            Spacer(Modifier.height(6.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Accent),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Shield,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "PrefixShield",
-                        color = TextMain,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = (-0.3).sp
-                    )
-                    Text(
-                        "Call screening & prefix blocking",
-                        color = TextDim,
-                        fontSize = 13.sp
-                    )
-                }
-            }
-        }
-
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Surface)
-                    .border(1.dp, if (blockingOn) On.copy(alpha = 0.35f) else Line, RoundedCornerShape(18.dp))
-                    .padding(16.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (blockingOn) On.copy(alpha = 0.15f) else Off.copy(alpha = 0.12f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Security,
-                            contentDescription = null,
-                            tint = if (blockingOn) On else Off,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            if (blockingOn) "Protection active" else "Protection paused",
-                            color = TextMain,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            when {
-                                !screeningEnabled -> "Enable call screening to start blocking"
-                                blockingOn -> "$activeRules active series · $totalBlockedCount blocked total"
-                                else -> "Screening on, blocking toggled off"
-                            },
-                            color = TextDim,
-                            fontSize = 13.sp
-                        )
-                    }
-                    Switch(
-                        checked = blockingOn,
-                        onCheckedChange = onToggleBlocking,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Accent
-                        )
-                    )
-                }
-                if (!screeningEnabled) {
-                    Spacer(Modifier.height(12.dp))
-                    Button(
-                        onClick = onEnableScreening,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.White)
-                    ) {
-                        Icon(Icons.Outlined.Shield, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Enable call screening")
-                    }
-                }
-            }
-        }
-
-        if (!phoneAccessEnabled) {
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF1A2030))
-                        .padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Outlined.Notifications, contentDescription = null, tint = Accent)
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Phone access needed", color = TextMain, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                        Text("Contacts, call log & alerts", color = TextDim, fontSize = 12.sp)
-                    }
-                    TextButton(onClick = onGrantPhoneAccess) {
-                        Text("Allow", color = Accent)
-                    }
-                }
-            }
-        }
-
-        item {
-            SettingToggleCard(
-                title = "Block saved contacts",
-                subtitle = "Reject numbers already in your address book",
-                icon = Icons.Outlined.ContactPhone,
-                checked = blockSavedOn,
-                onCheckedChange = onToggleBlockSaved
-            )
-        }
-
-        item {
-            Text(
-                "Number series",
-                color = TextMain,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(top = 4.dp)
-            )
-            Text(
-                "Calls starting with these digits are screened",
-                color = TextDim,
-                fontSize = 12.sp
-            )
-        }
-
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Surface)
-                    .padding(10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedTextField(
-                    value = prefixInput,
-                    onValueChange = onPrefixInputChange,
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                    leadingIcon = {
-                        Icon(Icons.Outlined.Tag, contentDescription = null, tint = TextDim)
-                    },
-                    placeholder = { Text("e.g. 0300") },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Phone,
-                        imeAction = ImeAction.Done
-                    ),
-                    keyboardActions = KeyboardActions(onDone = {
-                        onAddPrefix()
-                        focus.clearFocus()
-                    }),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Accent,
-                        unfocusedBorderColor = Color.Transparent,
-                        focusedContainerColor = Bg,
-                        unfocusedContainerColor = Bg,
-                        focusedTextColor = TextMain,
-                        unfocusedTextColor = TextMain,
-                        cursorColor = Accent,
-                        focusedPlaceholderColor = TextDim,
-                        unfocusedPlaceholderColor = TextDim
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                )
-                Spacer(Modifier.width(8.dp))
-                Button(
-                    onClick = {
-                        onAddPrefix()
-                        focus.clearFocus()
-                    },
-                    modifier = Modifier.height(56.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.White)
-                ) {
-                    Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(20.dp))
-                }
-            }
-        }
-
-        if (rules.isEmpty()) {
-            item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(Icons.Outlined.Tag, contentDescription = null, tint = TextDim, modifier = Modifier.size(40.dp))
-                    Spacer(Modifier.height(8.dp))
-                    Text("No series yet", color = TextMain, fontWeight = FontWeight.Medium)
-                    Text("Add a prefix to block matching callers", color = TextDim, fontSize = 13.sp)
-                }
-            }
-        } else {
-            items(rules, key = { it.prefix }) { rule ->
-                PrefixRow(
-                    rule = rule,
-                    onToggle = { onTogglePrefix(rule.prefix, it) },
-                    onDelete = { pendingDelete = rule }
-                )
-            }
-        }
-        item { Spacer(Modifier.height(8.dp)) }
-    }
-
-    pendingDelete?.let { rule ->
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            containerColor = Surface,
-            title = { Text("Delete ${rule.prefix}?", color = TextMain) },
-            confirmButton = {
-                TextButton(onClick = {
-                    onRemovePrefix(rule.prefix)
-                    pendingDelete = null
-                }) {
-                    Text("Delete", color = Off)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) {
-                    Text("Cancel", color = TextDim)
-                }
-            }
-        )
-    }
-}
-
-@Composable
-private fun PrefixRow(
-    rule: PrefixRule,
-    onToggle: (Boolean) -> Unit,
-    onDelete: () -> Unit
-) {
-    var menuOpen by remember { mutableStateOf(false) }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Surface)
-            .padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(if (rule.enabled) Accent.copy(alpha = 0.18f) else Color(0xFF1E2430)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Outlined.Tag,
-                contentDescription = null,
-                tint = if (rule.enabled) Accent else TextDim,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                rule.prefix,
-                color = if (rule.enabled) TextMain else TextDim,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Text(
-                if (rule.enabled) "Active" else "Paused",
-                color = TextDim,
-                fontSize = 12.sp
-            )
-        }
-        Box {
-            IconButton(onClick = { menuOpen = true }) {
-                Icon(Icons.Outlined.MoreVert, contentDescription = "More", tint = TextDim)
-            }
-            DropdownMenu(
-                expanded = menuOpen,
-                onDismissRequest = { menuOpen = false },
-                containerColor = Color(0xFF1C212A)
-            ) {
-                DropdownMenuItem(
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                if (rule.enabled) "On" else "Off",
-                                color = TextMain,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Switch(
-                                checked = rule.enabled,
-                                onCheckedChange = {
-                                    onToggle(it)
-                                    menuOpen = false
-                                },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = Accent
-                                )
-                            )
-                        }
-                    },
-                    onClick = {
-                        onToggle(!rule.enabled)
-                        menuOpen = false
-                    }
-                )
-                DropdownMenuItem(
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Outlined.Delete, contentDescription = null, tint = Off)
-                            Spacer(Modifier.width(10.dp))
-                            Text("Delete", color = Off)
-                        }
-                    },
-                    onClick = {
-                        menuOpen = false
-                        onDelete()
-                    }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SettingToggleCard(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Surface)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Accent.copy(alpha = 0.12f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(icon, contentDescription = null, tint = Accent, modifier = Modifier.size(20.dp))
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            Text(subtitle, color = TextDim, fontSize = 12.sp)
-        }
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = Accent
-            )
-        )
-    }
-}
-
-@Composable
-private fun BlockedTab(
-    padding: PaddingValues,
-    blockedCalls: List<BlockedCall>,
-    onClearLog: () -> Unit
-) {
-    val entries = remember(blockedCalls) { BlockedTimeFormat.buildListEntries(blockedCalls) }
-    val nowMillis = remember { System.currentTimeMillis() }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(padding)
-            .padding(horizontal = 20.dp)
-    ) {
-        Spacer(Modifier.height(18.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "Blocked",
-                    color = TextMain,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                if (blockedCalls.isNotEmpty()) {
-                    Text(
-                        "${blockedCalls.size} in log",
-                        color = TextDim,
-                        fontSize = 13.sp
-                    )
-                }
-            }
-            if (blockedCalls.isNotEmpty()) {
-                TextButton(onClick = onClearLog) {
-                    Text("Clear log", color = Accent)
-                }
-            }
-        }
-
-        if (blockedCalls.isEmpty()) {
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(72.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Surface),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.PhoneDisabled,
-                        contentDescription = null,
-                        tint = TextDim,
-                        modifier = Modifier.size(36.dp)
-                    )
-                }
-                Spacer(Modifier.height(16.dp))
-                Text("No blocked calls", color = TextMain, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.height(4.dp))
-                Text("Blocked numbers appear here with time", color = TextDim, fontSize = 13.sp)
-            }
-        } else {
-            Spacer(Modifier.height(12.dp))
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(
-                    entries,
-                    key = { entry ->
-                        when (entry) {
-                            is BlockedListEntry.Header -> "h-${entry.label}"
-                            is BlockedListEntry.Item -> "${entry.call.atMillis}-${entry.call.number}"
-                        }
-                    }
-                ) { entry ->
-                    when (entry) {
-                        is BlockedListEntry.Header -> BlockedDayHeader(entry.label)
-                        is BlockedListEntry.Item -> BlockedCallRow(entry.call, nowMillis)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun BlockedDayHeader(label: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            Icons.Outlined.CalendarToday,
-            contentDescription = null,
-            tint = Accent,
-            modifier = Modifier.size(16.dp)
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            label,
-            color = TextMain,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold
-        )
-    }
-}
-
-@Composable
-private fun BlockedCallRow(call: BlockedCall, nowMillis: Long) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Surface)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(44.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Off.copy(alpha = 0.12f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Outlined.PhoneDisabled,
-                contentDescription = null,
-                tint = Off,
-                modifier = Modifier.size(22.dp)
-            )
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                call.number,
-                color = TextMain,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Text(
-                "Matched ${call.matchedPrefix}",
-                color = TextDim,
-                fontSize = 12.sp
-            )
-        }
-        Text(
-            BlockedTimeFormat.formatBlockedAt(call.atMillis, nowMillis),
-            color = TextDim,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium
-        )
     }
 }
