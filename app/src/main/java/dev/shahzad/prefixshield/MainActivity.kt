@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
+import dev.shahzad.prefixshield.incall.AppForeground
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
@@ -55,6 +56,10 @@ class MainActivity : ComponentActivity() {
     private var pendingCallNumber: String? = null
     private var pendingDialDigits by mutableStateOf("")
     private var requestingDialerRole = false
+    private var updateBusy by mutableStateOf(false)
+    private var updateRelease by mutableStateOf<AppRelease?>(null)
+    private var showUpdateDialog by mutableStateOf(false)
+    private var checkedUpdateOnce = false
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val refreshDebounced = Runnable { refresh() }
@@ -172,7 +177,15 @@ class MainActivity : ComponentActivity() {
                     },
                     onRemovePrefix = { prefix ->
                         rules = app.prefixStore.remove(prefix)
-                    }
+                    },
+                    appVersion = AppUpdate.installedName(this),
+                    appVersionCode = AppUpdate.installedCode(this),
+                    updateBusy = updateBusy,
+                    updateRelease = updateRelease,
+                    showUpdateDialog = showUpdateDialog,
+                    onCheckUpdate = { checkForUpdate(false) },
+                    onInstallUpdate = ::installUpdate,
+                    onDismissUpdate = { showUpdateDialog = false }
                 )
             }
         }
@@ -187,8 +200,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        AppForeground.onResume()
         clearUnseenNotes()
         refresh()
+        if (!checkedUpdateOnce) {
+            checkedUpdateOnce = true
+            checkForUpdate(true)
+        }
+    }
+
+    override fun onPause() {
+        AppForeground.onPause()
+        super.onPause()
     }
 
     override fun onDestroy() {
@@ -344,33 +367,97 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun placeCall(number: String, canCall: Boolean) {
-        val digits = NumberMatcher.extractNumber(number).ifBlank {
+        val digits = NumberMatcher.dialable(number).ifBlank {
             number.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }
         }
         if (digits.isBlank()) {
             Toast.makeText(this, "No number to call", Toast.LENGTH_SHORT).show()
             return
         }
+        val tel = Uri.fromParts("tel", digits, null)
         if (isDialerHeld()) {
             try {
                 val telecom = getSystemService(TelecomManager::class.java)
                 val extras = Bundle().apply {
                     putInt(TelecomManager.EXTRA_START_CALL_WITH_VIDEO_STATE, VideoProfile.STATE_AUDIO_ONLY)
                 }
-                telecom.placeCall(Uri.fromParts("tel", digits, null), extras)
+                telecom.placeCall(tel, extras)
                 return
             } catch (_: Exception) {
             }
         }
         val action = if (canCall) Intent.ACTION_CALL else Intent.ACTION_DIAL
         try {
-            startActivity(Intent(action, Uri.parse("tel:$digits")))
+            startActivity(Intent(action, tel))
         } catch (_: Exception) {
             try {
-                startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$digits")))
+                startActivity(Intent(Intent.ACTION_DIAL, tel))
             } catch (_: Exception) {
                 Toast.makeText(this, "No phone app found", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    private fun checkForUpdate(silent: Boolean) {
+        if (AppUpdate.isNewer(updateRelease, AppUpdate.installedCode(this)) && !silent) {
+            showUpdateDialog = true
+            return
+        }
+        if (updateBusy) return
+        updateBusy = true
+        AppUpdate.fetch { result ->
+            updateBusy = false
+            result.fold(
+                onSuccess = { release ->
+                    updateRelease = release
+                    val newer = AppUpdate.isNewer(release, AppUpdate.installedCode(this))
+                    if (newer) showUpdateDialog = true
+                    else if (!silent) {
+                        Toast.makeText(this, "You're up to date", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onFailure = {
+                    if (!silent) Toast.makeText(this, "Could not check for update", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
+    }
+
+    private fun installUpdate() {
+        val url = updateRelease?.apkUrl?.takeIf { it.isNotBlank() } ?: run {
+            Toast.makeText(this, "No update file published yet", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+            Toast.makeText(this, "Allow installs from this app, then tap update again", Toast.LENGTH_LONG).show()
+            runCatching {
+                startActivity(
+                    Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                        data = Uri.fromParts("package", packageName, null)
+                    }
+                )
+            }.onFailure {
+                startActivity(
+                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.fromParts("package", packageName, null)
+                    }
+                )
+            }
+            return
+        }
+        updateBusy = true
+        AppUpdate.download(this, url) { result ->
+            updateBusy = false
+            result.fold(
+                onSuccess = { file ->
+                    runCatching { AppUpdate.install(this, file) }.onFailure {
+                        Toast.makeText(this, "Could not open installer", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onFailure = {
+                    Toast.makeText(this, "Download failed", Toast.LENGTH_SHORT).show()
+                }
+            )
         }
     }
 

@@ -1,7 +1,7 @@
 package dev.shahzad.prefixshield
 
 import android.app.Application
-import dev.shahzad.prefixshield.incall.IncomingCallNotifier
+import dev.shahzad.prefixshield.incall.CallNotifier
 
 class PrefixShieldApp : Application() {
     lateinit var prefixStore: PrefixStore
@@ -14,7 +14,7 @@ class PrefixShieldApp : Application() {
         prefixStore = PrefixStore(this)
         blockedLogStore = BlockedLogStore(this)
         BlockedNotifier.createChannel(this)
-        IncomingCallNotifier.createChannel(this)
+        CallNotifier.createChannel(this)
         instance = this
     }
 

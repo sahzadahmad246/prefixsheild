@@ -21,6 +21,8 @@ data class CallUiModel(
     val state: Int = Call.STATE_DISCONNECTED,
     val incoming: Boolean = false,
     val muted: Boolean = false,
+    val holding: Boolean = false,
+    val connectedAt: Long = 0L,
     val audioRoute: Int = CallAudioState.ROUTE_EARPIECE,
     val audioOptions: List<AudioRouteOption> = emptyList()
 ) {
@@ -40,7 +42,7 @@ data class CallUiModel(
             Call.STATE_RINGING -> "Incoming call"
             Call.STATE_DIALING, Call.STATE_CONNECTING, Call.STATE_PULLING_CALL -> "Calling…"
             Call.STATE_ACTIVE -> "Connected"
-            Call.STATE_HOLDING -> "On hold"
+            Call.STATE_HOLDING -> "On Hold"
             Call.STATE_DISCONNECTING -> "Ending…"
             else -> ""
         }
@@ -56,6 +58,8 @@ object CallSession {
 
     private val tracked = LinkedHashMap<Call, Call.Callback>()
     private var userPickedRoute = false
+    private var connectedAt = 0L
+    var onChanged: (() -> Unit)? = null
 
     fun bind(incall: InCallService) {
         service = incall
@@ -87,7 +91,10 @@ object CallSession {
 
     fun remove(call: Call) {
         tracked.remove(call)?.let { runCatching { call.unregisterCallback(it) } }
-        if (tracked.isEmpty()) userPickedRoute = false
+        if (tracked.isEmpty()) {
+            userPickedRoute = false
+            connectedAt = 0L
+        }
         publish()
     }
 
@@ -101,6 +108,12 @@ object CallSession {
 
     fun hangup() {
         primary()?.disconnect()
+    }
+
+    fun toggleHold() {
+        val call = primary() ?: return
+        if (call.state == Call.STATE_HOLDING) call.unhold() else call.hold()
+        publish()
     }
 
     fun setMuted(muted: Boolean) {
@@ -127,16 +140,23 @@ object CallSession {
         val raw = details?.handle?.schemeSpecificPart ?: details?.handle?.toString().orEmpty()
         val name = details?.callerDisplayName.orEmpty()
         if (!userPickedRoute) preferBluetooth()
+        val state = call?.state ?: Call.STATE_DISCONNECTED
+        if (state == Call.STATE_ACTIVE && connectedAt == 0L) {
+            connectedAt = System.currentTimeMillis()
+        }
         _ui.value = CallUiModel(
             hasCall = call != null,
             number = NumberMatcher.extractNumber(raw).ifBlank { raw },
             name = name,
-            state = call?.state ?: Call.STATE_DISCONNECTED,
-            incoming = call?.state == Call.STATE_RINGING,
+            state = state,
+            incoming = state == Call.STATE_RINGING,
             muted = audio?.isMuted == true,
+            holding = state == Call.STATE_HOLDING,
+            connectedAt = connectedAt,
             audioRoute = audio?.route ?: CallAudioState.ROUTE_EARPIECE,
             audioOptions = audioOptions(audio)
         )
+        onChanged?.invoke()
     }
 
     private fun preferBluetooth() {

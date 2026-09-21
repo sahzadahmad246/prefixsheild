@@ -8,8 +8,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -40,6 +39,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Backspace
 import androidx.compose.material.icons.automirrored.outlined.CallMade
 import androidx.compose.material.icons.automirrored.outlined.CallMissed
@@ -53,7 +53,6 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Dialpad
 import androidx.compose.material.icons.outlined.History
-import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.MoreVert
@@ -86,7 +85,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -110,16 +109,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-internal val Bg = Color(0xFF0B0D10)
-internal val Surface = Color(0xFF15181E)
-internal val Line = Color(0xFF2A303A)
-internal val TextMain = Color(0xFFF2F4F7)
-internal val TextDim = Color(0xFF8B93A1)
-internal val Accent = Color(0xFF6B8CFF)
-internal val On = Color(0xFF3DDC84)
-internal val Off = Color(0xFFFF6B6B)
+internal val Bg = Color(0xFFF2F2F7)
+internal val Surface = Color(0xFFFFFFFF)
+internal val Line = Color(0xFFC6C6C8)
+internal val TextMain = Color(0xFF000000)
+internal val TextDim = Color(0xFF8E8E93)
+internal val Fill = Color(0xFFE5E5EA)
+internal val Accent = Color(0xFF007AFF)
+internal val On = Color(0xFF34C759)
+internal val Off = Color(0xFFFF3B30)
 
-internal val appColors = darkColorScheme(
+internal val appColors = lightColorScheme(
     primary = Accent,
     onPrimary = Color.White,
     background = Bg,
@@ -169,7 +169,15 @@ fun DialerApp(
     onToggleContactStar: (DeviceContact) -> Unit,
     onAddPrefix: () -> Unit,
     onTogglePrefix: (String, Boolean) -> Unit,
-    onRemovePrefix: (String) -> Unit
+    onRemovePrefix: (String) -> Unit,
+    appVersion: String,
+    appVersionCode: Long,
+    updateBusy: Boolean,
+    updateRelease: AppRelease?,
+    showUpdateDialog: Boolean,
+    onCheckUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit,
+    onDismissUpdate: () -> Unit
 ) {
     var tab by remember { mutableIntStateOf(0) }
     var drawerOpen by remember { mutableStateOf(false) }
@@ -216,7 +224,7 @@ fun DialerApp(
         selectedTextColor = Accent,
         unselectedIconColor = TextDim,
         unselectedTextColor = TextDim,
-        indicatorColor = Color(0xFF1E2430)
+        indicatorColor = Fill
     )
 
     Box(modifier = Modifier.fillMaxSize().background(Bg)) {
@@ -228,8 +236,8 @@ fun DialerApp(
                         NavigationBarItem(
                             selected = tab == 0,
                             onClick = { tab = 0 },
-                            icon = { Icon(Icons.Outlined.Home, contentDescription = null) },
-                            label = { Text("Home") },
+                            icon = { Icon(Icons.Outlined.History, contentDescription = null) },
+                            label = { Text("Recents") },
                             colors = navColors
                         )
                         NavigationBarItem(
@@ -263,7 +271,13 @@ fun DialerApp(
                     onGrantPhoneAccess = onGrantPhoneAccess,
                     onAddPrefix = onAddPrefix,
                     onTogglePrefix = onTogglePrefix,
-                    onRemovePrefix = onRemovePrefix
+                    onRemovePrefix = onRemovePrefix,
+                    appVersion = appVersion,
+                    appVersionCode = appVersionCode,
+                    updateBusy = updateBusy,
+                    updateRelease = updateRelease,
+                    onCheckUpdate = onCheckUpdate,
+                    onInstallUpdate = onInstallUpdate
                 )
             } else when (tab) {
                 0 -> HomeRecentsTab(
@@ -317,24 +331,34 @@ fun DialerApp(
         AnimatedVisibility(
             visible = showDialer,
             modifier = Modifier.fillMaxSize(),
-            enter = slideInVertically(tween(320)) { it } + fadeIn(tween(220)),
-            exit = slideOutVertically(tween(280)) { it } + fadeOut(tween(180))
+            enter = fadeIn(tween(180)),
+            exit = fadeOut(tween(160))
         ) {
-            DialPadSheet(
-                seedDigits = pendingDialDigits,
-                onSeedConsumed = onPendingDialConsumed,
-                contacts = contacts,
-                logs = phoneLogs,
-                onPlaceCall = { number ->
-                    showDialer = false
-                    onPlaceCall(number)
-                },
-                onClose = { showDialer = false }
-            )
+            Box(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.32f))
+                        .clickable { showDialer = false }
+                )
+                DialPadSheet(
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                    seedDigits = pendingDialDigits,
+                    onSeedConsumed = onPendingDialConsumed,
+                    contacts = contacts,
+                    logs = phoneLogs,
+                    onPlaceCall = { number ->
+                        showDialer = false
+                        onPlaceCall(number)
+                    },
+                    onClose = { showDialer = false }
+                )
+            }
         }
 
         if (drawerOpen) {
             SideMenu(
+                appVersion = appVersion,
                 onDismiss = { drawerOpen = false },
                 onSettings = {
                     drawerOpen = false
@@ -370,6 +394,39 @@ fun DialerApp(
             )
         }
 
+        if (showUpdateDialog && AppUpdate.isNewer(updateRelease, appVersionCode)) {
+            AlertDialog(
+                onDismissRequest = onDismissUpdate,
+                containerColor = Surface,
+                title = { Text("Software Update", color = TextMain, fontWeight = FontWeight.SemiBold) },
+                text = {
+                    Column {
+                        Text(
+                            "myPhone ${updateRelease?.versionName.orEmpty()} is available.",
+                            color = TextMain,
+                            fontSize = 15.sp
+                        )
+                        val notes = updateRelease?.notes.orEmpty()
+                        if (notes.isNotBlank()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(notes, color = TextDim, fontSize = 14.sp)
+                        }
+                        if (updateBusy) {
+                            Spacer(Modifier.height(10.dp))
+                            Text("Downloading…", color = Accent, fontSize = 14.sp)
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = onInstallUpdate, enabled = !updateBusy) {
+                        Text(if (updateBusy) "Please wait" else "Download and Install", color = Accent)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = onDismissUpdate) { Text("Later", color = TextDim) }
+                }
+            )
+        }
         if (showDefaultPrompt && !dialerEnabled && !showSettings) {
             AlertDialog(
                 onDismissRequest = {
@@ -404,6 +461,7 @@ fun DialerApp(
 
 @Composable
 private fun SideMenu(
+    appVersion: String,
     onDismiss: () -> Unit,
     onSettings: () -> Unit,
     onClearHistory: () -> Unit
@@ -412,42 +470,43 @@ private fun SideMenu(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.45f))
+                .background(Color.Black.copy(alpha = 0.28f))
                 .clickable(onClick = onDismiss)
         )
         Column(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .fillMaxHeight()
-                .width(300.dp)
-                .background(Surface)
+                .width(312.dp)
+                .background(Bg)
                 .statusBarsPadding()
                 .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 24.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Accent),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Outlined.Shield, contentDescription = null, tint = Color.White)
-                }
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text("myPhone", color = TextMain, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Phone", color = TextDim, fontSize = 12.sp)
-                }
+            Text(
+                "Phone",
+                color = TextMain,
+                fontSize = 34.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 18.dp)
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Surface)
+            ) {
+                DrawerItem(Icons.Outlined.Settings, "Settings", onSettings)
+                HorizontalDivider(color = Line.copy(alpha = 0.65f), modifier = Modifier.padding(start = 52.dp))
+                DrawerItem(Icons.Outlined.Delete, "Clear Recents", onClearHistory)
             }
-            Spacer(Modifier.height(28.dp))
-            HorizontalDivider(color = Line)
-            Spacer(Modifier.height(8.dp))
-            DrawerItem(Icons.Outlined.Settings, "Settings", onSettings)
-            DrawerItem(Icons.Outlined.Delete, "Clear call history", onClearHistory)
             Spacer(Modifier.weight(1f))
-            Text("v1.0.0", color = TextDim, fontSize = 12.sp)
+            Text(
+                "myPhone  ·  $appVersion",
+                color = TextDim,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(start = 8.dp, bottom = 12.dp)
+            )
         }
     }
 }
@@ -457,14 +516,22 @@ private fun DrawerItem(icon: ImageVector, label: String, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
-            .padding(vertical = 14.dp, horizontal = 8.dp),
+            .padding(horizontal = 14.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, contentDescription = null, tint = Accent)
-        Spacer(Modifier.width(14.dp))
-        Text(label, color = TextMain, fontSize = 16.sp)
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(Accent),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(label, color = TextMain, fontSize = 17.sp, modifier = Modifier.weight(1f))
+        Text("›", color = Color(0xFFC7C7CC), fontSize = 22.sp)
     }
 }
 
@@ -496,6 +563,13 @@ private fun HomeRecentsTab(
             .padding(padding)
     ) {
         Spacer(Modifier.height(8.dp))
+        Text(
+            "Recents",
+            color = TextMain,
+            fontSize = 34.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+        )
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -509,9 +583,8 @@ private fun HomeRecentsTab(
                 modifier = Modifier
                     .weight(1f)
                     .height(46.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Surface)
-                    .border(1.dp, Line, RoundedCornerShape(24.dp))
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Fill)
                     .padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -743,7 +816,7 @@ private fun DialLogRow(
         DropdownMenu(
             expanded = menu,
             onDismissRequest = { menu = false },
-            containerColor = Color(0xFF1C212A)
+                containerColor = Surface
         ) {
             DropdownMenuItem(
                 text = {
@@ -795,6 +868,7 @@ private fun DialLogRow(
 
 @Composable
 private fun DialPadSheet(
+    modifier: Modifier = Modifier,
     seedDigits: String,
     onSeedConsumed: () -> Unit,
     contacts: List<DeviceContact>,
@@ -828,79 +902,67 @@ private fun DialPadSheet(
     )
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
             .background(Bg)
-            .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Dial", color = TextMain, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            IconButton(onClick = onClose) {
-                Icon(Icons.Outlined.Close, contentDescription = "Close", tint = TextMain)
-            }
-        }
-        LazyColumn(
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f, fill = true)
-        ) {
-            items(suggestions, key = { it.contactId.toString() + it.primaryNumber }) { item ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .combinedClickable(
-                            onClick = { digits = item.primaryNumber.filter { ch -> ch.isDigit() || ch == '+' } },
-                            onLongClick = { onPlaceCall(item.primaryNumber) }
-                        )
-                        .padding(horizontal = 4.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
+                .padding(bottom = 8.dp)
+                .size(width = 36.dp, height = 5.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(Fill)
+                .clickable(onClick = onClose)
+        )
+        if (suggestions.isNotEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 168.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Surface)
+            ) {
+                suggestions.forEachIndexed { index, item ->
+                    Row(
                         modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(Accent.copy(alpha = 0.14f)),
-                        contentAlignment = Alignment.Center
+                            .fillMaxWidth()
+                            .clickable { onPlaceCall(item.primaryNumber) }
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            item.name.firstOrNull()?.uppercaseChar()?.toString() ?: "#",
-                            color = Accent,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                item.name,
+                                color = TextMain,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(item.primaryNumber, color = TextDim, fontSize = 13.sp, maxLines = 1)
+                        }
+                        Icon(Icons.Outlined.Call, contentDescription = "Call", tint = On, modifier = Modifier.size(20.dp))
                     }
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            item.name,
-                            color = TextMain,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1
-                        )
-                        Text(item.primaryNumber, color = TextDim, fontSize = 12.sp, maxLines = 1)
-                    }
-                    IconButton(onClick = { onPlaceCall(item.primaryNumber) }) {
-                        Icon(Icons.Outlined.Call, contentDescription = "Call", tint = Accent)
+                    if (index < suggestions.lastIndex) {
+                        HorizontalDivider(color = Line.copy(alpha = 0.55f), modifier = Modifier.padding(start = 14.dp))
                     }
                 }
-                HorizontalDivider(color = Line.copy(alpha = 0.7f), modifier = Modifier.padding(start = 76.dp))
             }
+            Spacer(Modifier.height(8.dp))
         }
         Text(
             text = digits.ifEmpty { " " },
             color = TextMain,
-            fontSize = if (digits.length > 13) 28.sp else 36.sp,
+            fontSize = if (digits.length > 13) 26.sp else 34.sp,
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.Center,
             maxLines = 1
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(6.dp))
         keys.chunked(3).forEach { row ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -909,9 +971,10 @@ private fun DialPadSheet(
                 row.forEach { (digit, letters, _) ->
                     Box(
                         modifier = Modifier
-                            .size(72.dp)
+                            .padding(vertical = 3.dp)
+                            .size(68.dp)
                             .clip(CircleShape)
-                            .background(Surface)
+                            .background(Fill)
                             .combinedClickable(
                                 onClick = { if (digits.length < 20) digits += digit },
                                 onLongClick = {
@@ -923,48 +986,50 @@ private fun DialPadSheet(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(digit, color = TextMain, fontSize = 26.sp, fontWeight = FontWeight.Medium)
                             if (letters.isNotEmpty()) {
-                                Text(letters, color = TextDim, fontSize = 10.sp, letterSpacing = 1.sp)
+                                Text(letters, color = TextDim, fontSize = 9.sp, letterSpacing = 1.sp)
                             }
                         }
                     }
                 }
             }
-            Spacer(Modifier.height(10.dp))
         }
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp, bottom = 4.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Spacer(Modifier.size(72.dp))
-            FloatingActionButton(
-                onClick = { if (digits.isNotBlank()) onPlaceCall(digits) },
-                containerColor = On,
-                contentColor = Color.White,
-                modifier = Modifier.size(68.dp)
+            Spacer(Modifier.size(68.dp))
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(CircleShape)
+                    .background(On)
+                    .clickable { if (digits.isNotBlank()) onPlaceCall(digits) },
+                contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Outlined.Call, contentDescription = "Call", modifier = Modifier.size(28.dp))
+                Icon(Icons.Outlined.Call, contentDescription = "Call", tint = Color.White, modifier = Modifier.size(28.dp))
             }
             Box(
-                modifier = Modifier.size(72.dp),
+                modifier = Modifier.size(68.dp),
                 contentAlignment = Alignment.Center
             ) {
                 if (digits.isNotEmpty()) {
-                    Box(
+                    Icon(
+                        Icons.AutoMirrored.Outlined.Backspace,
+                        contentDescription = "Delete",
+                        tint = TextMain,
                         modifier = Modifier
-                            .size(48.dp)
+                            .size(28.dp)
                             .combinedClickable(
                                 onClick = { digits = digits.dropLast(1) },
                                 onLongClick = { digits = "" }
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.AutoMirrored.Outlined.Backspace, contentDescription = "Delete", tint = TextDim)
-                    }
+                            )
+                    )
                 }
             }
         }
-        Spacer(Modifier.height(8.dp))
     }
 }
 
@@ -988,7 +1053,13 @@ private fun SettingsScreen(
     onGrantPhoneAccess: () -> Unit,
     onAddPrefix: () -> Unit,
     onTogglePrefix: (String, Boolean) -> Unit,
-    onRemovePrefix: (String) -> Unit
+    onRemovePrefix: (String) -> Unit,
+    appVersion: String,
+    appVersionCode: Long,
+    updateBusy: Boolean,
+    updateRelease: AppRelease?,
+    onCheckUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit
 ) {
     val focus = LocalFocusManager.current
     var pendingDelete by remember { mutableStateOf<PrefixRule?>(null) }
@@ -1006,9 +1077,9 @@ private fun SettingsScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Outlined.Close, contentDescription = "Back", tint = TextMain)
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = Accent)
             }
-            Text("Settings", color = TextMain, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            Text("Settings", color = Accent, fontSize = 17.sp)
         }
         Column(
             modifier = Modifier
@@ -1101,7 +1172,7 @@ private fun SettingsScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF1A2030))
+                        .background(Fill)
                         .padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -1203,6 +1274,32 @@ private fun SettingsScreen(
                     )
                 }
             }
+            Spacer(Modifier.height(8.dp))
+            Text("GENERAL", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Surface)
+                    .clickable { onCheckUpdate() }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Software Update", color = TextMain, fontSize = 17.sp, modifier = Modifier.weight(1f))
+                Text(
+                    when {
+                        updateBusy -> "Checking…"
+                        (updateRelease?.versionCode ?: 0) > appVersionCode &&
+                            updateRelease?.apkUrl?.isNotBlank() == true -> updateRelease?.versionName ?: "Available"
+                        updateRelease != null -> "Up to Date"
+                        else -> appVersion
+                    },
+                    color = TextDim,
+                    fontSize = 16.sp
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("›", color = Color(0xFFC7C7CC), fontSize = 20.sp)
+            }
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -1244,7 +1341,7 @@ private fun PrefixRow(
             modifier = Modifier
                 .size(36.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(if (rule.enabled) Accent.copy(alpha = 0.18f) else Color(0xFF1E2430)),
+                .background(if (rule.enabled) Accent.copy(alpha = 0.18f) else Fill),
             contentAlignment = Alignment.Center
         ) {
             Icon(
@@ -1271,7 +1368,7 @@ private fun PrefixRow(
             DropdownMenu(
                 expanded = menuOpen,
                 onDismissRequest = { menuOpen = false },
-                containerColor = Color(0xFF1C212A)
+                containerColor = Surface
             ) {
                 DropdownMenuItem(
                     text = {

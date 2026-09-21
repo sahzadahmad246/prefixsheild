@@ -198,15 +198,24 @@ object ContactStore {
 
     fun suggestions(query: String, contacts: List<DeviceContact>, logs: List<PhoneLogEntry>): List<DeviceContact> {
         val digits = NumberMatcher.extractNumber(query)
-        if (digits.length < 2) return emptyList()
+        if (digits.length < 2) {
+            return logs.mapNotNull { log ->
+                val number = log.number
+                if (number.isBlank()) return@mapNotNull null
+                DeviceContact(0L, log.name?.takeIf { it.isNotBlank() } ?: number, listOf(number), false)
+            }.distinctBy { NumberMatcher.extractNumber(it.primaryNumber) }.take(5)
+        }
+        fun matches(number: String): Boolean {
+            val n = NumberMatcher.extractNumber(number)
+            val local = if (n.length > 10) n.takeLast(10) else n
+            return n.contains(digits) || local.startsWith(digits) || local.contains(digits)
+        }
         val fromContacts = contacts.filter { contact ->
-            contact.numbers.any { NumberMatcher.extractNumber(it).contains(digits) } ||
-                t9(contact.name).contains(digits)
+            contact.numbers.any { matches(it) } || t9(contact.name).contains(digits)
         }
         val extra = logs.mapNotNull { log ->
             val number = log.number
-            if (number.isBlank()) return@mapNotNull null
-            if (!NumberMatcher.extractNumber(number).contains(digits)) return@mapNotNull null
+            if (number.isBlank() || !matches(number)) return@mapNotNull null
             if (fromContacts.any { it.numbers.any { n -> NumberMatcher.extractNumber(n) == NumberMatcher.extractNumber(number) } }) {
                 return@mapNotNull null
             }

@@ -1,5 +1,6 @@
 package dev.shahzad.prefixshield.incall
 
+import android.app.KeyguardManager
 import android.content.Intent
 import android.telecom.Call
 import android.telecom.CallAudioState
@@ -14,12 +15,15 @@ class PrefixInCallService : InCallService() {
     override fun onBind(intent: Intent): android.os.IBinder? {
         val binder = super.onBind(intent)
         CallSession.bind(this)
+        CallSession.onChanged = { refreshChrome() }
         return binder
     }
 
     override fun onUnbind(intent: Intent): Boolean {
+        CallSession.onChanged = null
         CallSession.unbind(this)
-        IncomingCallNotifier.cancel(this)
+        CallRingtone.stop()
+        CallNotifier.cancel(this)
         return super.onUnbind(intent)
     }
 
@@ -45,10 +49,50 @@ class PrefixInCallService : InCallService() {
             }
         }
         CallSession.add(call)
-        val title = details?.callerDisplayName
-            ?: details?.handle?.schemeSpecificPart
-            ?: "Call"
-        IncomingCallNotifier.show(this, title, call.state == Call.STATE_RINGING)
+        launchCallUi()
+    }
+
+    override fun onCallRemoved(call: Call) {
+        CallSession.remove(call)
+    }
+
+    override fun onCallAudioStateChanged(audioState: CallAudioState) {
+        CallSession.publish()
+    }
+
+    private fun refreshChrome() {
+        val model = CallSession.ui.value
+        if (!model.hasCall) {
+            CallRingtone.stop()
+            CallNotifier.cancel(this)
+            return
+        }
+        CallNotifier.show(this, model)
+        if (model.incoming && model.state == Call.STATE_RINGING) {
+            CallRingtone.start(this)
+        } else {
+            CallRingtone.stop()
+        }
+    }
+
+    private fun launchCallUi() {
+        val model = CallSession.ui.value
+        val ringing = model.incoming && model.state == Call.STATE_RINGING
+        val locked = getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true
+        if (ringing && !locked && !AppForeground.isVisible) {
+            startActivity(
+                Intent(this, IncomingBannerActivity::class.java).addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+                )
+            )
+        } else {
+            openFullCall()
+        }
+    }
+
+    private fun openFullCall() {
         startActivity(
             Intent(this, InCallActivity::class.java).addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or
@@ -57,14 +101,5 @@ class PrefixInCallService : InCallService() {
                     Intent.FLAG_ACTIVITY_NO_USER_ACTION
             )
         )
-    }
-
-    override fun onCallRemoved(call: Call) {
-        CallSession.remove(call)
-        if (!CallSession.ui.value.hasCall) IncomingCallNotifier.cancel(this)
-    }
-
-    override fun onCallAudioStateChanged(audioState: CallAudioState) {
-        CallSession.publish()
     }
 }

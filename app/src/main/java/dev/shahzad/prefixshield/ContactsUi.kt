@@ -97,8 +97,8 @@ fun ContactsTab(
             Text(
                 "Contacts",
                 color = TextMain,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.SemiBold,
+                fontSize = 34.sp,
+                fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(horizontal = 20.dp)
             )
             Row(
@@ -106,8 +106,8 @@ fun ContactsTab(
                     .padding(horizontal = 16.dp, vertical = 10.dp)
                     .fillMaxWidth()
                     .height(46.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Surface)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Fill)
                     .padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -298,26 +298,47 @@ private fun ContactDetailSheet(
                     Text(number, color = Accent, fontSize = 16.sp)
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
-                IconButton(onClick = onStar) {
-                    Icon(
-                        if (contact.starred) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                        contentDescription = "Favorite",
-                        tint = Accent
-                    )
-                }
-                IconButton(onClick = onEdit) {
-                    Icon(Icons.Outlined.Edit, contentDescription = "Edit", tint = TextMain)
-                }
-                IconButton(onClick = onBlock) {
-                    Icon(Icons.Outlined.Block, contentDescription = "Block", tint = Off)
-                }
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Outlined.Delete, contentDescription = "Delete", tint = Off)
-                }
+            Spacer(Modifier.height(16.dp))
+            Row(
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                ContactAction(Icons.Outlined.Call, "call", On) { onCall(contact.primaryNumber) }
+                ContactAction(Icons.Outlined.Edit, "edit", Accent, onEdit)
+                ContactAction(
+                    if (contact.starred) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                    "favorite",
+                    Accent,
+                    onStar
+                )
+                ContactAction(Icons.Outlined.Block, "block", Off, onBlock)
             }
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = onDelete) { Text("Delete Contact", color = Off) }
         }
+    }
+}
+
+@Composable
+private fun ContactAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    tint: Color,
+    onClick: () -> Unit
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(Fill)
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = label, tint = tint)
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(label, color = Accent, fontSize = 12.sp)
     }
 }
 
@@ -388,7 +409,7 @@ private fun ContactEditorDialog(
                     DropdownMenu(
                         expanded = accountMenu,
                         onDismissRequest = { accountMenu = false },
-                        containerColor = Color(0xFF1C212A)
+                        containerColor = Surface
                     ) {
                         accounts.forEach { item ->
                             DropdownMenuItem(

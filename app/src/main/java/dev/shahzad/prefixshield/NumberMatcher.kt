@@ -16,6 +16,39 @@ object NumberMatcher {
         return digitsOnly(core)
     }
 
+    /**
+     * Number to hand to Telecom. 10-digit locals stay local.
+     * Stored +91… keeps the plus. Bare 91 + 10 digits is dialed as 10 digits
+     * so the network does not treat it as an invalid 12-digit local number.
+     */
+    fun dialable(raw: String): String {
+        val decoded = percentDecode(raw)
+        val core = decoded.substringBefore("@").substringBefore(";")
+            .substringAfter("tel:").substringAfter("TEL:").trim()
+        val special = core.filter { it.isDigit() || it == '+' || it == '*' || it == '#' || it == ',' || it == ';' }
+        if (special.any { it == '*' || it == '#' }) return special.ifBlank { core }
+
+        val hadPlus = core.startsWith("+")
+        var digits = digitsOnly(core)
+        if (digits.isEmpty()) return special
+
+        if (digits.startsWith("00") && digits.length > 4) {
+            return "+" + digits.drop(2)
+        }
+        if (hadPlus) return "+$digits"
+
+        if (digits.startsWith("0") && digits.length == 11) {
+            digits = digits.drop(1)
+        }
+        if (digits.length == 12 && digits.startsWith("91")) {
+            return digits.takeLast(10)
+        }
+        if (digits.length > 12 && digits.startsWith("91") && digits.drop(2).length == 10) {
+            return digits.takeLast(10)
+        }
+        return digits
+    }
+
     fun normalizePrefix(prefix: String): String = extractNumber(prefix)
 
     fun matchingPrefix(rawNumber: String?, prefixes: List<PrefixRule>): String? =
