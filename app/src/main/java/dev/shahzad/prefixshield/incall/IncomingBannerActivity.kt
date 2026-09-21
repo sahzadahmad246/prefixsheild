@@ -116,106 +116,76 @@ private fun IncomingBanner(
     onDecline: () -> Unit,
     onAnswer: () -> Unit
 ) {
-    val pulse = rememberInfiniteTransition(label = "banner")
-    val scale by pulse.animateFloat(
-        1f, 1.18f, infiniteRepeatable(tween(1100), RepeatMode.Reverse), label = "s"
-    )
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(horizontal = 10.dp, vertical = 8.dp)
+            .padding(horizontal = 8.dp, vertical = 6.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .shadow(24.dp, RoundedCornerShape(28.dp))
-                .clip(RoundedCornerShape(28.dp))
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color(0xF22C2C2E), Color(0xF11C1C1E))
-                    )
-                )
+                .shadow(18.dp, RoundedCornerShape(24.dp))
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xF21C1C1E))
                 .clickable(onClick = onOpen)
-                .padding(horizontal = 18.dp, vertical = 16.dp)
+                .padding(horizontal = 14.dp, vertical = 12.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .size(54.dp)
+                        .size(42.dp)
                         .clip(CircleShape)
-                        .background(
-                            Brush.linearGradient(listOf(Color(0xFF5AC8FA), Color(0xFF007AFF)))
-                        ),
+                        .background(Color(0xFF3A3A3C)),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         title.firstOrNull()?.uppercaseChar()?.toString() ?: "#",
                         color = Color.White,
-                        fontSize = 22.sp,
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
-                Spacer(Modifier.width(14.dp))
+                Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Incoming call", color = Color(0xFF8E8E93), fontSize = 13.sp)
                     Text(
                         title,
                         color = Color.White,
-                        fontSize = 22.sp,
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text("mobile · myPhone", color = Color(0xFF8E8E93), fontSize = 14.sp)
+                    Text("mobile", color = Color(0xFF8E8E93), fontSize = 13.sp)
                 }
             }
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(12.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                BannerAction(Color(0xFFFF3B30), Icons.Filled.CallEnd, "Decline", 1f, onDecline)
-                BannerAction(Color(0xFF34C759), Icons.Filled.Call, "Accept", scale, onAnswer)
+                BannerPill(Color(0xFFFF3B30), "Decline", Modifier.weight(1f), onDecline)
+                BannerPill(Color(0xFF34C759), "Accept", Modifier.weight(1f), onAnswer)
             }
         }
     }
 }
 
 @Composable
-private fun BannerAction(
+private fun BannerPill(
     color: Color,
-    icon: ImageVector,
     label: String,
-    scale: Float,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(64.dp)) {
-            if (scale != 1f) {
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                            alpha = (1.4f - scale).coerceIn(0.15f, 0.45f)
-                        }
-                        .background(color, CircleShape)
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(CircleShape)
-                    .background(color)
-                    .clickable(onClick = onClick),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(icon, contentDescription = label, tint = Color.White, modifier = Modifier.size(26.dp))
-            }
-        }
-        Text(label, color = Color.White, fontSize = 12.sp)
+    Box(
+        modifier = modifier
+            .height(40.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(color)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
     }
 }

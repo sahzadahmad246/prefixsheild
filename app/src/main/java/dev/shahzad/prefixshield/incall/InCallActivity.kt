@@ -14,8 +14,10 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,10 +25,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Call
@@ -46,6 +50,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,12 +58,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 
@@ -211,19 +220,14 @@ private fun InCallScreen(model: CallUiModel) {
         }
 
         if (model.incoming && model.state == Call.STATE_RINGING) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IosCallButton(Icons.Filled.CallEnd, CallRed, "Decline") {
-                    CallRingtone.stop()
-                    CallSession.reject()
-                }
-                PulseAnswer {
-                    CallRingtone.stop()
-                    CallSession.answer()
-                }
+            IosCallButton(Icons.Filled.CallEnd, CallRed, "Decline") {
+                CallRingtone.stop()
+                CallSession.reject()
+            }
+            Spacer(Modifier.height(28.dp))
+            SlideToAnswer {
+                CallRingtone.stop()
+                CallSession.answer()
             }
         } else {
             IosCallButton(Icons.Filled.CallEnd, CallRed, "End") { CallSession.hangup() }
@@ -233,44 +237,46 @@ private fun InCallScreen(model: CallUiModel) {
 }
 
 @Composable
-private fun PulseAnswer(onClick: () -> Unit) {
-    val infinite = rememberInfiniteTransition(label = "answer")
-    val scale by infinite.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.55f,
-        animationSpec = infiniteRepeatable(tween(1400), RepeatMode.Restart),
-        label = "scale"
-    )
-    val alpha by infinite.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 0f,
-        animationSpec = infiniteRepeatable(tween(1400), RepeatMode.Restart),
-        label = "alpha"
-    )
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(96.dp)) {
-            Box(
-                modifier = Modifier
-                    .size(76.dp)
-                    .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                        this.alpha = alpha
-                    }
-                    .background(CallGreen, CircleShape)
-            )
-            Box(
-                modifier = Modifier
-                    .size(76.dp)
-                    .clip(CircleShape)
-                    .background(CallGreen)
-                    .clickable(onClick = onClick),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Filled.Call, contentDescription = "Accept", tint = CallWhite, modifier = Modifier.size(32.dp))
-            }
+private fun SlideToAnswer(onAnswer: () -> Unit) {
+    var drag by remember { mutableFloatStateOf(0f) }
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(64.dp)
+            .clip(RoundedCornerShape(32.dp))
+            .background(Color(0xFF1C1C1E))
+    ) {
+        val travel = with(LocalDensity.current) { (maxWidth - 64.dp).toPx().coerceAtLeast(1f) }
+        Text(
+            "slide to answer",
+            color = CallDim,
+            fontSize = 17.sp,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .graphicsLayer { alpha = (1f - drag / travel).coerceIn(0f, 1f) }
+        )
+        Box(
+            modifier = Modifier
+                .padding(4.dp)
+                .offset { IntOffset(drag.roundToInt(), 0) }
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(CallGreen)
+                .pointerInput(travel) {
+                    detectHorizontalDragGestures(
+                        onHorizontalDrag = { _, delta ->
+                            drag = (drag + delta).coerceIn(0f, travel)
+                        },
+                        onDragEnd = {
+                            if (drag > travel * 0.72f) onAnswer() else drag = 0f
+                        },
+                        onDragCancel = { drag = 0f }
+                    )
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Filled.Call, contentDescription = "Answer", tint = CallWhite, modifier = Modifier.size(28.dp))
         }
-        Text("Accept", color = CallWhite, fontSize = 13.sp)
     }
 }
 

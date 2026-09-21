@@ -491,61 +491,62 @@ private fun HomeRecentsTab(
             .fillMaxSize()
             .padding(padding)
     ) {
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Recents",
-            color = TextMain,
-            fontSize = 34.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
-        )
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp),
+                .padding(start = 20.dp, end = 8.dp, top = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onVoiceSearch) {
-                Icon(Icons.Outlined.Mic, contentDescription = "Voice search", tint = Accent)
-            }
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(46.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Fill)
-                    .padding(horizontal = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Outlined.Search, contentDescription = null, tint = TextDim, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                BasicTextField(
-                    value = search,
-                    onValueChange = onSearchChange,
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                    textStyle = TextStyle(color = TextMain, fontSize = 15.sp),
-                    cursorBrush = SolidColor(Accent),
-                    decorationBox = { inner ->
-                        if (search.isEmpty()) {
-                            Text("Search calls", color = TextDim, fontSize = 15.sp)
-                        }
-                        inner()
-                    }
-                )
-                if (search.isNotEmpty()) {
-                    Icon(
-                        Icons.Outlined.Close,
-                        contentDescription = "Clear",
-                        tint = TextDim,
-                        modifier = Modifier
-                            .size(18.dp)
-                            .clickable { onSearchChange("") }
-                    )
-                }
-            }
+            Text(
+                "Recents",
+                color = TextMain,
+                fontSize = 34.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f)
+            )
             IconButton(onClick = onOpenSettings) {
                 Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = Accent)
+            }
+        }
+        Row(
+            modifier = Modifier
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .fillMaxWidth()
+                .height(46.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Fill)
+                .padding(start = 14.dp, end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Outlined.Search, contentDescription = null, tint = TextDim, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            BasicTextField(
+                value = search,
+                onValueChange = onSearchChange,
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                textStyle = TextStyle(color = TextMain, fontSize = 15.sp),
+                cursorBrush = SolidColor(Accent),
+                decorationBox = { inner ->
+                    if (search.isEmpty()) {
+                        Text("Search calls", color = TextDim, fontSize = 15.sp)
+                    }
+                    inner()
+                }
+            )
+            if (search.isNotEmpty()) {
+                Icon(
+                    Icons.Outlined.Close,
+                    contentDescription = "Clear",
+                    tint = TextDim,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clickable { onSearchChange("") }
+                )
+                Spacer(Modifier.width(4.dp))
+            }
+            IconButton(onClick = onVoiceSearch) {
+                Icon(Icons.Outlined.Mic, contentDescription = "Voice search", tint = Accent)
             }
         }
 
