@@ -185,6 +185,7 @@ fun DialerApp(
     var confirmClear by remember { mutableStateOf(false) }
     var showDefaultPrompt by remember { mutableStateOf(false) }
     var showDialer by remember { mutableStateOf(false) }
+    var selectedLog by remember { mutableStateOf<DialLogEntry?>(null) }
     var search by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(LogFilter.ALL) }
 
@@ -200,7 +201,8 @@ fun DialerApp(
             showDialer = true
         }
     }
-    BackHandler(enabled = showDialer) { showDialer = false }
+    BackHandler(enabled = selectedLog != null) { selectedLog = null }
+    BackHandler(enabled = showDialer && selectedLog == null) { showDialer = false }
     LaunchedEffect(dialerEnabled, promptDefaultDialer) {
         if (!dialerEnabled && promptDefaultDialer) {
             kotlinx.coroutines.delay(700)
@@ -279,6 +281,22 @@ fun DialerApp(
                     onCheckUpdate = onCheckUpdate,
                     onInstallUpdate = onInstallUpdate
                 )
+            } else if (selectedLog != null) {
+                CallDetailPage(
+                    padding = padding,
+                    entry = selectedLog!!,
+                    logs = logs,
+                    blockedBySeries = NumberMatcher.matchingPrefix(selectedLog!!.number, rules) != null,
+                    onBack = { selectedLog = null },
+                    onPlaceCall = onPlaceCall,
+                    onCopyNumber = onCopyNumber,
+                    onBlockNumber = onBlockNumber,
+                    onUnblockNumber = onUnblockNumber,
+                    onDeleteLog = {
+                        onDeleteLog(it)
+                        selectedLog = null
+                    }
+                )
             } else when (tab) {
                 0 -> HomeRecentsTab(
                     padding = padding,
@@ -296,7 +314,8 @@ fun DialerApp(
                     onCopyNumber = onCopyNumber,
                     onBlockNumber = onBlockNumber,
                     onUnblockNumber = onUnblockNumber,
-                    onDeleteLog = onDeleteLog
+                    onDeleteLog = onDeleteLog,
+                    onOpenDetail = { selectedLog = it }
                 )
                 else -> ContactsTab(
                     padding = padding,
@@ -314,7 +333,7 @@ fun DialerApp(
             }
         }
 
-        if (!showSettings && tab == 0 && !showDialer) {
+        if (!showSettings && tab == 0 && !showDialer && selectedLog == null) {
             FloatingActionButton(
                 onClick = { showDialer = true },
                 containerColor = On,
@@ -552,7 +571,8 @@ private fun HomeRecentsTab(
     onCopyNumber: (String) -> Unit,
     onBlockNumber: (String) -> Unit,
     onUnblockNumber: (String) -> Unit,
-    onDeleteLog: (DialLogEntry) -> Unit
+    onDeleteLog: (DialLogEntry) -> Unit,
+    onOpenDetail: (DialLogEntry) -> Unit
 ) {
     val nowMillis = remember(logs) { System.currentTimeMillis() }
     val grouped = remember(logs) { BlockedTimeFormat.groupByDay(logs, timeOf = { it.atMillis }) }
@@ -718,7 +738,8 @@ private fun HomeRecentsTab(
                                 onCopyNumber = onCopyNumber,
                                 onBlockNumber = onBlockNumber,
                                 onUnblockNumber = onUnblockNumber,
-                                onDeleteLog = onDeleteLog
+                                onDeleteLog = onDeleteLog,
+                                onOpenDetail = onOpenDetail
                             )
                             HorizontalDivider(
                                 color = Line.copy(alpha = 0.7f),
@@ -741,7 +762,8 @@ private fun DialLogRow(
     onCopyNumber: (String) -> Unit,
     onBlockNumber: (String) -> Unit,
     onUnblockNumber: (String) -> Unit,
-    onDeleteLog: (DialLogEntry) -> Unit
+    onDeleteLog: (DialLogEntry) -> Unit,
+    onOpenDetail: (DialLogEntry) -> Unit
 ) {
     var menu by remember { mutableStateOf(false) }
     val typeColor = when {
@@ -773,7 +795,7 @@ private fun DialLogRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .combinedClickable(
-                    onClick = { menu = true },
+                    onClick = { onOpenDetail(entry) },
                     onLongClick = { menu = true }
                 )
                 .padding(horizontal = 16.dp, vertical = 10.dp),
@@ -863,6 +885,278 @@ private fun DialLogRow(
                 }
             )
         }
+    }
+}
+
+@Composable
+private fun CallDetailPage(
+    padding: PaddingValues,
+    entry: DialLogEntry,
+    logs: List<DialLogEntry>,
+    blockedBySeries: Boolean,
+    onBack: () -> Unit,
+    onPlaceCall: (String) -> Unit,
+    onCopyNumber: (String) -> Unit,
+    onBlockNumber: (String) -> Unit,
+    onUnblockNumber: (String) -> Unit,
+    onDeleteLog: (DialLogEntry) -> Unit
+) {
+    val nowMillis = remember(logs) { System.currentTimeMillis() }
+    val related = remember(entry, logs) {
+        logs.filter { sameCallerForDetails(entry, it) }.sortedByDescending { it.atMillis }
+    }
+    val lastCall = related.firstOrNull() ?: entry
+    val totalDuration = related.sumOf { it.durationSec }
+    val missedCount = related.count { !it.blocked && it.type == CallLog.Calls.MISSED_TYPE }
+    val blockedCount = related.count { it.blocked }
+    val subtitle = entry.number.ifBlank { entry.typeLabel }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .background(Bg)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = Accent)
+            }
+            Text("Recents", color = Accent, fontSize = 17.sp)
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .size(92.dp)
+                    .clip(CircleShape)
+                    .background(if (entry.blocked) Off.copy(alpha = 0.14f) else Accent.copy(alpha = 0.16f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    entry.title.firstOrNull()?.uppercaseChar()?.toString() ?: "#",
+                    color = if (entry.blocked) Off else Accent,
+                    fontSize = 36.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                entry.title,
+                color = if (entry.blocked) Off else TextMain,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(subtitle, color = TextDim, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(18.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                DetailAction(
+                    icon = Icons.Outlined.Call,
+                    label = "call",
+                    tint = On,
+                    modifier = Modifier.weight(1f)
+                ) { if (entry.number.isNotBlank()) onPlaceCall(entry.number) }
+                DetailAction(
+                    icon = Icons.Outlined.ContentCopy,
+                    label = "copy",
+                    tint = Accent,
+                    modifier = Modifier.weight(1f)
+                ) { onCopyNumber(entry.number.ifBlank { entry.title }) }
+                DetailAction(
+                    icon = if (blockedBySeries) Icons.Outlined.Shield else Icons.Outlined.Block,
+                    label = if (blockedBySeries) "unblock" else "block",
+                    tint = if (blockedBySeries) On else Off,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    if (blockedBySeries) onUnblockNumber(entry.number) else onBlockNumber(entry.number)
+                }
+            }
+            Spacer(Modifier.height(18.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Surface)
+            ) {
+                InfoLine("Last call", "${lastCall.typeLabel} · ${BlockedTimeFormat.formatBlockedAt(lastCall.atMillis, nowMillis)}")
+                HorizontalDivider(color = Line.copy(alpha = 0.7f), modifier = Modifier.padding(start = 16.dp))
+                InfoLine("Calls", related.size.toString())
+                if (totalDuration > 0) {
+                    HorizontalDivider(color = Line.copy(alpha = 0.7f), modifier = Modifier.padding(start = 16.dp))
+                    InfoLine("Total duration", formatDuration(totalDuration))
+                }
+                if (missedCount > 0) {
+                    HorizontalDivider(color = Line.copy(alpha = 0.7f), modifier = Modifier.padding(start = 16.dp))
+                    InfoLine("Missed", missedCount.toString(), valueColor = Off)
+                }
+                if (blockedCount > 0) {
+                    HorizontalDivider(color = Line.copy(alpha = 0.7f), modifier = Modifier.padding(start = 16.dp))
+                    InfoLine("Blocked", blockedCount.toString(), valueColor = Off)
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+            Text(
+                "Call History",
+                color = TextMain,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(8.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Surface)
+            ) {
+                related.forEachIndexed { index, item ->
+                    CallHistoryLine(
+                        entry = item,
+                        nowMillis = nowMillis,
+                        onDelete = { onDeleteLog(item) }
+                    )
+                    if (index < related.lastIndex) {
+                        HorizontalDivider(color = Line.copy(alpha = 0.7f), modifier = Modifier.padding(start = 54.dp))
+                    }
+                }
+            }
+            Spacer(Modifier.height(28.dp))
+        }
+    }
+}
+
+@Composable
+private fun DetailAction(
+    icon: ImageVector,
+    label: String,
+    tint: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(Surface)
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.height(6.dp))
+        Text(label, color = Accent, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun InfoLine(label: String, value: String, valueColor: Color = TextMain) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, color = TextDim, fontSize = 15.sp, modifier = Modifier.weight(1f))
+        Text(value, color = valueColor, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun CallHistoryLine(
+    entry: DialLogEntry,
+    nowMillis: Long,
+    onDelete: () -> Unit
+) {
+    var menu by remember { mutableStateOf(false) }
+    val typeColor = when {
+        entry.blocked -> Off
+        entry.type == CallLog.Calls.MISSED_TYPE || entry.type == CallLog.Calls.REJECTED_TYPE -> Off
+        entry.type == CallLog.Calls.OUTGOING_TYPE -> Accent
+        else -> On
+    }
+    val typeIcon = when {
+        entry.blocked -> Icons.Outlined.PhoneDisabled
+        entry.type == CallLog.Calls.OUTGOING_TYPE -> Icons.AutoMirrored.Outlined.CallMade
+        entry.type == CallLog.Calls.MISSED_TYPE -> Icons.AutoMirrored.Outlined.CallMissed
+        entry.type == CallLog.Calls.INCOMING_TYPE -> Icons.AutoMirrored.Outlined.CallReceived
+        else -> Icons.Outlined.Call
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = {}, onLongClick = { menu = true })
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(typeIcon, contentDescription = null, tint = typeColor, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(entry.typeLabel, color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(
+                listOfNotNull(
+                    BlockedTimeFormat.formatBlockedAt(entry.atMillis, nowMillis),
+                    entry.durationLabel
+                ).joinToString(" · "),
+                color = TextDim,
+                fontSize = 13.sp
+            )
+        }
+        Box {
+            IconButton(onClick = { menu = true }) {
+                Icon(Icons.Outlined.MoreVert, contentDescription = "More", tint = TextDim)
+            }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Surface) {
+                DropdownMenuItem(
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Delete, contentDescription = null, tint = Off, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(10.dp))
+                            Text("Delete", color = Off)
+                        }
+                    },
+                    onClick = {
+                        menu = false
+                        onDelete()
+                    }
+                )
+            }
+        }
+    }
+}
+
+private fun sameCallerForDetails(seed: DialLogEntry, other: DialLogEntry): Boolean {
+    val a = NumberMatcher.extractNumber(seed.number)
+    val b = NumberMatcher.extractNumber(other.number)
+    if (a.isNotBlank() && b.isNotBlank()) {
+        if (a == b) return true
+        val keep = minOf(10, a.length, b.length)
+        if (keep >= 7 && a.takeLast(keep) == b.takeLast(keep)) return true
+    }
+    return seed.name?.takeIf { it.isNotBlank() } == other.name?.takeIf { it.isNotBlank() }
+}
+
+private fun formatDuration(seconds: Long): String {
+    val hours = seconds / 3600
+    val minutes = (seconds % 3600) / 60
+    val secs = seconds % 60
+    return when {
+        hours > 0 -> "${hours}h ${minutes}m"
+        minutes > 0 -> "${minutes}m ${secs}s"
+        else -> "${secs}s"
     }
 }
 

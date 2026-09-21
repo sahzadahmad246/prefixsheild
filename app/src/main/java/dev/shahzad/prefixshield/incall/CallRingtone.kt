@@ -13,8 +13,10 @@ import android.os.VibratorManager
 object CallRingtone {
     private var ringtone: Ringtone? = null
     private var vibrator: Vibrator? = null
+    private var silenced = false
 
     fun start(context: Context) {
+        if (silenced) return
         if (ringtone?.isPlaying == true) return
         val app = context.applicationContext
         val audio = app.getSystemService(AudioManager::class.java)
@@ -45,6 +47,17 @@ object CallRingtone {
         vibrator?.cancel()
         vibrator = null
     }
+
+    fun silence() {
+        silenced = true
+        stop()
+    }
+
+    fun resetSilence() {
+        silenced = false
+    }
+
+    fun isSilenced(): Boolean = silenced
 
     private fun startVibrate(context: Context) {
         val vibe = if (Build.VERSION.SDK_INT >= 31) {

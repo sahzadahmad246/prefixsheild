@@ -1,7 +1,10 @@
 package dev.shahzad.prefixshield.incall
 
 import android.app.KeyguardManager
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.telecom.Call
 import android.telecom.CallAudioState
 import android.telecom.InCallService
@@ -12,10 +15,23 @@ import dev.shahzad.prefixshield.CallDecision
 import dev.shahzad.prefixshield.NumberMatcher
 
 class PrefixInCallService : InCallService() {
+    private val screenOffReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_SCREEN_OFF && CallSession.ui.value.incoming) {
+                CallRingtone.silence()
+            }
+        }
+    }
+    private var receiverRegistered = false
+
     override fun onBind(intent: Intent): android.os.IBinder? {
         val binder = super.onBind(intent)
         CallSession.bind(this)
         CallSession.onChanged = { refreshChrome() }
+        if (!receiverRegistered) {
+            registerReceiver(screenOffReceiver, IntentFilter(Intent.ACTION_SCREEN_OFF))
+            receiverRegistered = true
+        }
         return binder
     }
 
@@ -24,6 +40,10 @@ class PrefixInCallService : InCallService() {
         CallSession.unbind(this)
         CallRingtone.stop()
         CallNotifier.cancel(this)
+        if (receiverRegistered) {
+            unregisterReceiver(screenOffReceiver)
+            receiverRegistered = false
+        }
         return super.onUnbind(intent)
     }
 
@@ -48,6 +68,9 @@ class PrefixInCallService : InCallService() {
                 return
             }
         }
+        if (call.state == Call.STATE_RINGING) {
+            CallRingtone.resetSilence()
+        }
         CallSession.add(call)
         launchCallUi()
     }
@@ -64,11 +87,12 @@ class PrefixInCallService : InCallService() {
         val model = CallSession.ui.value
         if (!model.hasCall) {
             CallRingtone.stop()
+            CallRingtone.resetSilence()
             CallNotifier.cancel(this)
             return
         }
         CallNotifier.show(this, model)
-        if (model.incoming && model.state == Call.STATE_RINGING) {
+        if (model.incoming && model.state == Call.STATE_RINGING && !CallRingtone.isSilenced()) {
             CallRingtone.start(this)
         } else {
             CallRingtone.stop()

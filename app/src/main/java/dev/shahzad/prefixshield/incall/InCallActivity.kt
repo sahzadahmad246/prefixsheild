@@ -3,6 +3,7 @@ package dev.shahzad.prefixshield.incall
 import android.os.Bundle
 import android.telecom.Call
 import android.telecom.CallAudioState
+import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -96,6 +97,20 @@ class InCallActivity : ComponentActivity() {
         AppForeground.onPause()
         super.onPause()
     }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (CallSession.ui.value.incoming && isSilenceKey(keyCode)) {
+            CallRingtone.silence()
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    private fun isSilenceKey(keyCode: Int): Boolean = keyCode == KeyEvent.KEYCODE_VOLUME_UP ||
+        keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
+        keyCode == KeyEvent.KEYCODE_VOLUME_MUTE ||
+        keyCode == KeyEvent.KEYCODE_MUTE ||
+        keyCode == KeyEvent.KEYCODE_HEADSETHOOK
 }
 
 @Composable

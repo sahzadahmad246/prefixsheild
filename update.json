@@ -1,6 +1,6 @@
 {
-  "versionCode": 3,
-  "versionName": "1.2.0",
-  "apkUrl": "https://github.com/sahzadahmad246/prefixsheild/releases/download/v1.2.0/app-release.apk",
-  "notes": "Update to 1.2.0."
+  "versionCode": 4,
+  "versionName": "1.3.0",
+  "apkUrl": "https://github.com/sahzadahmad246/prefixsheild/releases/download/v1.3.0/app-release.apk",
+  "notes": "Number detail pages, side-button call silence, and better contact editing."
 }

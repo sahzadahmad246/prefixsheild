@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Add
@@ -54,6 +55,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -350,9 +352,15 @@ private fun ContactEditorDialog(
     onSave: (String, String, ContactAccount) -> Unit
 ) {
     var name by remember { mutableStateOf(existing?.name.orEmpty()) }
-    var number by remember { mutableStateOf(existing?.primaryNumber.orEmpty()) }
-    var account by remember { mutableStateOf(accounts.firstOrNull { it.isGoogle } ?: accounts.first()) }
+    val initialPhone = remember(existing) { splitPhoneForEditor(existing?.primaryNumber.orEmpty()) }
+    var countryCode by remember { mutableStateOf(initialPhone.first) }
+    var number by remember { mutableStateOf(initialPhone.second) }
+    var account by remember {
+        mutableStateOf(accounts.firstOrNull { it.isGoogle } ?: accounts.firstOrNull() ?: ContactAccount("", ContactAccount.TYPE_PHONE, "Phone"))
+    }
     var accountMenu by remember { mutableStateOf(false) }
+    val cleanNumber = remember(countryCode, number) { buildEditorPhone(countryCode, number) }
+    val canSave = cleanNumber.isNotBlank()
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedBorderColor = Accent,
         unfocusedBorderColor = Line,
@@ -367,45 +375,104 @@ private fun ContactEditorDialog(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(Surface)
-                .padding(20.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .background(Bg)
+                .padding(16.dp)
         ) {
-            Text(
-                if (existing == null) "New contact" else "Edit contact",
-                color = TextMain,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold
-            )
+            Box(modifier = Modifier.fillMaxWidth()) {
+                TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterStart)) {
+                    Text("Cancel", color = Accent)
+                }
+                Text(
+                    if (existing == null) "New Contact" else "Edit Contact",
+                    color = TextMain,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.align(Alignment.Center)
+                )
+                TextButton(
+                    onClick = { onSave(name.ifBlank { cleanNumber }, cleanNumber, account) },
+                    enabled = canSave,
+                    modifier = Modifier.align(Alignment.CenterEnd)
+                ) {
+                    Text("Done", color = if (canSave) Accent else TextDim, fontWeight = FontWeight.SemiBold)
+                }
+            }
             Spacer(Modifier.height(14.dp))
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Name") },
-                singleLine = true,
-                colors = fieldColors
-            )
-            Spacer(Modifier.height(10.dp))
-            OutlinedTextField(
-                value = number,
-                onValueChange = { number = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Number") },
-                singleLine = true,
-                colors = fieldColors
-            )
-            if (existing == null) {
-                Spacer(Modifier.height(10.dp))
-                Box(modifier = Modifier.clickable { accountMenu = true }) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .size(86.dp)
+                        .clip(CircleShape)
+                        .background(Accent.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        name.firstOrNull()?.uppercaseChar()?.toString() ?: "#",
+                        color = Accent,
+                        fontSize = 34.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Surface)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Name") },
+                    singleLine = true,
+                    colors = fieldColors
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     OutlinedTextField(
-                        value = if (account.isGoogle) "Google · ${account.label}" else account.label,
-                        onValueChange = {},
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = false,
-                        label = { Text("Save to") },
+                        value = countryCode,
+                        onValueChange = { countryCode = sanitizeCountryCode(it) },
+                        modifier = Modifier.width(94.dp),
+                        label = { Text("Code") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         colors = fieldColors
                     )
+                    OutlinedTextField(
+                        value = number,
+                        onValueChange = { number = sanitizePhoneLocal(it) },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("Phone") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                        colors = fieldColors
+                    )
+                }
+                Text(
+                    cleanNumber.ifBlank { "Only numbers, spaces, dashes, parentheses and + are allowed" },
+                    color = TextDim,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(start = 4.dp, top = 6.dp, bottom = 2.dp)
+                )
+            }
+            if (existing == null) {
+                Spacer(Modifier.height(12.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Surface)
+                        .clickable { accountMenu = true }
+                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Text("Save to", color = TextDim, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                        Text(if (account.isGoogle) "Google · ${account.label}" else account.label, color = TextMain, fontSize = 15.sp)
+                    }
                     DropdownMenu(
                         expanded = accountMenu,
                         onDismissRequest = { accountMenu = false },
@@ -428,13 +495,39 @@ private fun ContactEditorDialog(
                     }
                 }
             }
-            Spacer(Modifier.height(16.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onDismiss) { Text("Cancel", color = TextDim) }
-                TextButton(
-                    onClick = { if (number.isNotBlank()) onSave(name, number, account) }
-                ) { Text("Save", color = Accent) }
-            }
         }
     }
+}
+
+private fun splitPhoneForEditor(raw: String): Pair<String, String> {
+    val sanitized = sanitizePhoneLocal(raw)
+    if (!sanitized.startsWith("+")) return "+92" to sanitized
+    val digits = sanitized.drop(1).filter { it.isDigit() }
+    val countryDigits = when {
+        digits.startsWith("92") -> 2
+        digits.startsWith("1") -> 1
+        digits.length >= 3 -> 3
+        else -> digits.length
+    }
+    val code = "+${digits.take(countryDigits)}".takeIf { it.length > 1 } ?: "+92"
+    val rest = digits.drop(countryDigits)
+    return code to rest
+}
+
+private fun sanitizeCountryCode(value: String): String {
+    val digits = value.filter { it.isDigit() }.take(4)
+    return if (digits.isBlank()) "+" else "+$digits"
+}
+
+private fun sanitizePhoneLocal(value: String): String {
+    return value.filter { it.isDigit() || it == ' ' || it == '-' || it == '(' || it == ')' || it == '+' }
+        .take(24)
+}
+
+private fun buildEditorPhone(countryCode: String, local: String): String {
+    val cleanLocal = sanitizePhoneLocal(local).trim()
+    if (cleanLocal.isBlank()) return ""
+    if (cleanLocal.startsWith("+")) return cleanLocal
+    val cleanCode = sanitizeCountryCode(countryCode).takeIf { it.length > 1 }.orEmpty()
+    return (cleanCode + cleanLocal.filter { it.isDigit() }).ifBlank { cleanLocal }
 }

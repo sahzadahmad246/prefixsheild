@@ -3,6 +3,7 @@ package dev.shahzad.prefixshield.incall
 import android.content.Intent
 import android.os.Bundle
 import android.telecom.Call
+import android.view.KeyEvent
 import android.view.Gravity
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -84,6 +85,14 @@ class IncomingBannerActivity : ComponentActivity() {
         }
     }
 
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (CallSession.ui.value.incoming && isSilenceKey(keyCode)) {
+            CallRingtone.silence()
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
     private fun openFullCall() {
         startActivity(
             Intent(this, InCallActivity::class.java).addFlags(
@@ -92,6 +101,12 @@ class IncomingBannerActivity : ComponentActivity() {
         )
         finish()
     }
+
+    private fun isSilenceKey(keyCode: Int): Boolean = keyCode == KeyEvent.KEYCODE_VOLUME_UP ||
+        keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
+        keyCode == KeyEvent.KEYCODE_VOLUME_MUTE ||
+        keyCode == KeyEvent.KEYCODE_MUTE ||
+        keyCode == KeyEvent.KEYCODE_HEADSETHOOK
 }
 
 @Composable
