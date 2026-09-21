@@ -507,14 +507,14 @@ class MainActivity : ComponentActivity() {
         Toast.makeText(this, "Unblocked $matched", Toast.LENGTH_SHORT).show()
     }
 
-    private fun saveContact(name: String, number: String, account: ContactAccount) {
-        val ok = ContactStore.insert(this, name, number, account)
+    private fun saveContact(draft: ContactDraft) {
+        val ok = ContactStore.insert(this, draft)
         Toast.makeText(this, if (ok) "Contact saved" else "Could not save contact", Toast.LENGTH_SHORT).show()
         refresh()
     }
 
-    private fun updateContact(contact: DeviceContact, name: String, number: String) {
-        val ok = ContactStore.update(this, contact.contactId, name, number)
+    private fun updateContact(contact: DeviceContact, draft: ContactDraft) {
+        val ok = ContactStore.update(this, contact.contactId, draft)
         Toast.makeText(this, if (ok) "Contact updated" else "Could not update", Toast.LENGTH_SHORT).show()
         refresh()
     }
@@ -530,9 +530,11 @@ class MainActivity : ComponentActivity() {
         refresh()
     }
 
-    private fun deleteLog(entry: DialLogEntry) {
-        entry.callLogId?.let { PhoneLogStore.delete(this, it) }
-        app.blockedLogStore.removeMatching(entry.number, entry.atMillis)
+    private fun deleteLog(entries: List<DialLogEntry>) {
+        entries.forEach { entry ->
+            entry.callLogId?.let { PhoneLogStore.delete(this, it) }
+            app.blockedLogStore.removeMatching(entry.number, entry.atMillis)
+        }
         refresh()
     }
 

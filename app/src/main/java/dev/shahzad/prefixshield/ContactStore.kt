@@ -15,9 +15,31 @@ data class DeviceContact(
     val contactId: Long,
     val name: String,
     val numbers: List<String>,
-    val starred: Boolean
+    val starred: Boolean,
+    val givenName: String = "",
+    val familyName: String = "",
+    val company: String = "",
+    val email: String = "",
+    val note: String = ""
 ) {
     val primaryNumber: String get() = numbers.firstOrNull().orEmpty()
+}
+
+data class ContactDraft(
+    val givenName: String,
+    val familyName: String,
+    val company: String,
+    val phone: String,
+    val email: String,
+    val note: String,
+    val account: ContactAccount
+) {
+    val displayName: String
+        get() = listOf(givenName.trim(), familyName.trim())
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+            .ifBlank { company.trim() }
+            .ifBlank { phone.trim() }
 }
 
 data class ContactAccount(
@@ -68,8 +90,19 @@ object ContactStore {
                 if (row.numbers.none { it == number }) row.numbers += number
             }
         }
-        return byId.values.map {
-            DeviceContact(it.id, it.name.ifBlank { it.numbers.first() }, it.numbers.toList(), it.starred)
+        fillDetails(context, byId)
+        return byId.values.map { row ->
+            DeviceContact(
+                contactId = row.id,
+                name = row.display.ifBlank { row.numbers.first() },
+                numbers = row.numbers.toList(),
+                starred = row.starred,
+                givenName = row.givenName,
+                familyName = row.familyName,
+                company = row.company,
+                email = row.email,
+                note = row.note
+            )
         }
     }
 
@@ -107,74 +140,82 @@ object ContactStore {
         return found.values.toList()
     }
 
-    fun insert(context: Context, name: String, number: String, account: ContactAccount): Boolean {
+    fun insert(context: Context, draft: ContactDraft): Boolean {
         if (!canWrite(context)) return false
-        val trimmedName = name.trim().ifBlank { number }
-        val trimmedNumber = number.trim()
-        if (trimmedNumber.isBlank()) return false
-        if (account.isSim) return insertSim(context, trimmedName, trimmedNumber)
+        val phone = draft.phone.trim()
+        if (phone.isBlank()) return false
+        val display = draft.displayName.ifBlank { phone }
+        if (draft.account.isSim) return insertSim(context, display, phone)
         val ops = ArrayList<ContentProviderOperation>()
         val raw = ContentProviderOperation.newInsert(ContactsContract.RawContacts.CONTENT_URI)
-        if (account.type == ContactAccount.TYPE_PHONE) {
+        if (draft.account.type == ContactAccount.TYPE_PHONE) {
             raw.withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, null)
             raw.withValue(ContactsContract.RawContacts.ACCOUNT_NAME, null)
         } else {
-            raw.withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, account.type)
-            raw.withValue(ContactsContract.RawContacts.ACCOUNT_NAME, account.name)
+            raw.withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, draft.account.type)
+            raw.withValue(ContactsContract.RawContacts.ACCOUNT_NAME, draft.account.name)
         }
         ops += raw.build()
         ops += ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
             .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
             .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE)
-            .withValue(ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME, trimmedName)
+            .withValue(ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME, display)
+            .withValue(ContactsContract.CommonDataKinds.StructuredName.GIVEN_NAME, draft.givenName.trim())
+            .withValue(ContactsContract.CommonDataKinds.StructuredName.FAMILY_NAME, draft.familyName.trim())
             .build()
-        ops += ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
-            .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
-            .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE)
-            .withValue(ContactsContract.CommonDataKinds.Phone.NUMBER, trimmedNumber)
-            .withValue(ContactsContract.CommonDataKinds.Phone.TYPE, ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE)
-            .build()
+        ops += phoneInsert(phone)
+        if (draft.company.isNotBlank()) ops += companyInsert(draft.company.trim())
+        if (draft.email.isNotBlank()) ops += emailInsert(draft.email.trim())
+        if (draft.note.isNotBlank()) ops += noteInsert(draft.note.trim())
         return runCatching {
             context.contentResolver.applyBatch(ContactsContract.AUTHORITY, ops)
             true
         }.getOrDefault(false)
     }
 
-    fun update(context: Context, contactId: Long, name: String, number: String): Boolean {
+    fun update(context: Context, contactId: Long, draft: ContactDraft): Boolean {
         if (!canWrite(context) || contactId <= 0L) return false
-        val display = name.trim().ifBlank { number.trim() }
-        val phone = number.trim()
+        val phone = draft.phone.trim()
+        if (phone.isBlank()) return false
+        val display = draft.displayName.ifBlank { phone }
         runCatching {
-            context.contentResolver.update(
-                ContactsContract.Data.CONTENT_URI,
-                ContentValues().apply {
-                    put(ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME, display)
-                },
-                "${ContactsContract.Data.CONTACT_ID}=? AND ${ContactsContract.Data.MIMETYPE}=?",
-                arrayOf(contactId.toString(), ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE)
-            )
+            upsertMime(context, contactId, ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE) {
+                put(ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME, display)
+                put(ContactsContract.CommonDataKinds.StructuredName.GIVEN_NAME, draft.givenName.trim())
+                put(ContactsContract.CommonDataKinds.StructuredName.FAMILY_NAME, draft.familyName.trim())
+            }
         }
-        val updated = runCatching {
-            context.contentResolver.update(
-                ContactsContract.Data.CONTENT_URI,
-                ContentValues().apply {
-                    put(ContactsContract.CommonDataKinds.Phone.NUMBER, phone)
-                },
-                "${ContactsContract.Data.CONTACT_ID}=? AND ${ContactsContract.Data.MIMETYPE}=?",
-                arrayOf(contactId.toString(), ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE)
-            )
-        }.getOrDefault(0)
-        if (updated == 0 && phone.isNotBlank()) {
-            val rawId = rawContactId(context, contactId) ?: return false
-            context.contentResolver.insert(
-                ContactsContract.Data.CONTENT_URI,
-                ContentValues().apply {
-                    put(ContactsContract.Data.RAW_CONTACT_ID, rawId)
-                    put(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE)
-                    put(ContactsContract.CommonDataKinds.Phone.NUMBER, phone)
-                    put(ContactsContract.CommonDataKinds.Phone.TYPE, ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE)
-                }
-            )
+        runCatching {
+            upsertMime(context, contactId, ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE) {
+                put(ContactsContract.CommonDataKinds.Phone.NUMBER, phone)
+                put(ContactsContract.CommonDataKinds.Phone.TYPE, ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE)
+            }
+        }
+        writeOptional(
+            context,
+            contactId,
+            ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE,
+            draft.company.trim()
+        ) {
+            put(ContactsContract.CommonDataKinds.Organization.COMPANY, draft.company.trim())
+            put(ContactsContract.CommonDataKinds.Organization.TYPE, ContactsContract.CommonDataKinds.Organization.TYPE_WORK)
+        }
+        writeOptional(
+            context,
+            contactId,
+            ContactsContract.CommonDataKinds.Email.CONTENT_ITEM_TYPE,
+            draft.email.trim()
+        ) {
+            put(ContactsContract.CommonDataKinds.Email.ADDRESS, draft.email.trim())
+            put(ContactsContract.CommonDataKinds.Email.TYPE, ContactsContract.CommonDataKinds.Email.TYPE_HOME)
+        }
+        writeOptional(
+            context,
+            contactId,
+            ContactsContract.CommonDataKinds.Note.CONTENT_ITEM_TYPE,
+            draft.note.trim()
+        ) {
+            put(ContactsContract.CommonDataKinds.Note.NOTE, draft.note.trim())
         }
         return true
     }
@@ -274,10 +315,145 @@ object ContactStore {
         ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CONTACTS) ==
             PackageManager.PERMISSION_GRANTED
 
+    private fun fillDetails(context: Context, byId: Map<Long, MutableContact>) {
+        if (byId.isEmpty() || !canRead(context)) return
+        val nameMime = ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE
+        val orgMime = ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE
+        val emailMime = ContactsContract.CommonDataKinds.Email.CONTENT_ITEM_TYPE
+        val noteMime = ContactsContract.CommonDataKinds.Note.CONTENT_ITEM_TYPE
+        context.contentResolver.query(
+            ContactsContract.Data.CONTENT_URI,
+            arrayOf(
+                ContactsContract.Data.CONTACT_ID,
+                ContactsContract.Data.MIMETYPE,
+                ContactsContract.Data.DATA1,
+                ContactsContract.Data.DATA2,
+                ContactsContract.Data.DATA3
+            ),
+            "${ContactsContract.Data.MIMETYPE} IN (?,?,?,?)",
+            arrayOf(nameMime, orgMime, emailMime, noteMime),
+            null
+        )?.use { cursor ->
+            val idCol = cursor.getColumnIndex(ContactsContract.Data.CONTACT_ID)
+            val mimeCol = cursor.getColumnIndex(ContactsContract.Data.MIMETYPE)
+            val data1 = cursor.getColumnIndex(ContactsContract.Data.DATA1)
+            val data2 = cursor.getColumnIndex(ContactsContract.Data.DATA2)
+            val data3 = cursor.getColumnIndex(ContactsContract.Data.DATA3)
+            while (cursor.moveToNext()) {
+                val id = if (idCol >= 0) cursor.getLong(idCol) else continue
+                val row = byId[id] ?: continue
+                val mime = if (mimeCol >= 0) cursor.getString(mimeCol).orEmpty() else continue
+                val first = if (data1 >= 0) cursor.getString(data1).orEmpty() else ""
+                when (mime) {
+                    nameMime -> {
+                        val given = if (data2 >= 0) cursor.getString(data2).orEmpty() else ""
+                        val family = if (data3 >= 0) cursor.getString(data3).orEmpty() else ""
+                        if (given.isNotBlank()) row.givenName = given
+                        if (family.isNotBlank()) row.familyName = family
+                        if (row.name.isBlank() && first.isNotBlank()) row.name = first
+                    }
+                    orgMime -> if (first.isNotBlank()) row.company = first
+                    emailMime -> if (first.isNotBlank() && row.email.isBlank()) row.email = first
+                    noteMime -> if (first.isNotBlank()) row.note = first
+                }
+            }
+        }
+    }
+
+    private fun phoneInsert(phone: String): ContentProviderOperation {
+        return ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+            .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+            .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE)
+            .withValue(ContactsContract.CommonDataKinds.Phone.NUMBER, phone)
+            .withValue(ContactsContract.CommonDataKinds.Phone.TYPE, ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE)
+            .build()
+    }
+
+    private fun companyInsert(company: String): ContentProviderOperation {
+        return ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+            .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+            .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE)
+            .withValue(ContactsContract.CommonDataKinds.Organization.COMPANY, company)
+            .withValue(ContactsContract.CommonDataKinds.Organization.TYPE, ContactsContract.CommonDataKinds.Organization.TYPE_WORK)
+            .build()
+    }
+
+    private fun emailInsert(email: String): ContentProviderOperation {
+        return ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+            .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+            .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Email.CONTENT_ITEM_TYPE)
+            .withValue(ContactsContract.CommonDataKinds.Email.ADDRESS, email)
+            .withValue(ContactsContract.CommonDataKinds.Email.TYPE, ContactsContract.CommonDataKinds.Email.TYPE_HOME)
+            .build()
+    }
+
+    private fun noteInsert(note: String): ContentProviderOperation {
+        return ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+            .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+            .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Note.CONTENT_ITEM_TYPE)
+            .withValue(ContactsContract.CommonDataKinds.Note.NOTE, note)
+            .build()
+    }
+
+    private fun writeOptional(
+        context: Context,
+        contactId: Long,
+        mime: String,
+        value: String,
+        fill: ContentValues.() -> Unit
+    ) {
+        if (value.isBlank()) {
+            deleteMime(context, contactId, mime)
+        } else {
+            runCatching { upsertMime(context, contactId, mime, fill) }
+        }
+    }
+
+    private fun upsertMime(
+        context: Context,
+        contactId: Long,
+        mime: String,
+        fill: ContentValues.() -> Unit
+    ): Boolean {
+        val values = ContentValues().apply(fill)
+        val updated = context.contentResolver.update(
+            ContactsContract.Data.CONTENT_URI,
+            values,
+            "${ContactsContract.Data.CONTACT_ID}=? AND ${ContactsContract.Data.MIMETYPE}=?",
+            arrayOf(contactId.toString(), mime)
+        )
+        if (updated > 0) return true
+        val rawId = rawContactId(context, contactId) ?: return false
+        values.put(ContactsContract.Data.RAW_CONTACT_ID, rawId)
+        values.put(ContactsContract.Data.MIMETYPE, mime)
+        return context.contentResolver.insert(ContactsContract.Data.CONTENT_URI, values) != null
+    }
+
+    private fun deleteMime(context: Context, contactId: Long, mime: String) {
+        runCatching {
+            context.contentResolver.delete(
+                ContactsContract.Data.CONTENT_URI,
+                "${ContactsContract.Data.CONTACT_ID}=? AND ${ContactsContract.Data.MIMETYPE}=?",
+                arrayOf(contactId.toString(), mime)
+            )
+        }
+    }
+
     private data class MutableContact(
         val id: Long,
-        val name: String,
+        var name: String,
         val starred: Boolean,
-        val numbers: MutableList<String> = mutableListOf()
-    )
+        val numbers: MutableList<String> = mutableListOf(),
+        var givenName: String = "",
+        var familyName: String = "",
+        var company: String = "",
+        var email: String = "",
+        var note: String = ""
+    ) {
+        val display: String
+            get() {
+                val structured = listOf(givenName, familyName).filter { it.isNotBlank() }.joinToString(" ")
+                return structured.ifBlank { name }.ifBlank { company }
+            }
+    }
 }

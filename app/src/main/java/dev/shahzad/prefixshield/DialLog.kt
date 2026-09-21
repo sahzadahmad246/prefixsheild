@@ -37,9 +37,18 @@ data class DialLogEntry(
         }
 }
 
+data class RecentBurst(
+    val latest: DialLogEntry,
+    val calls: List<DialLogEntry>
+) {
+    val count: Int get() = calls.size
+    val key: String get() = latest.key
+}
+
 enum class LogFilter { ALL, INCOMING, OUTGOING, MISSED, BLOCKED }
 
 object DialLogMerger {
+    private const val BURST_WINDOW_MS = 2 * 60 * 60 * 1000L
     fun merge(
         phoneLogs: List<PhoneLogEntry>,
         blockedCalls: List<BlockedCall>
@@ -88,6 +97,23 @@ object DialLogMerger {
         return merged.sortedByDescending { it.atMillis }
     }
 
+    /** Calls to the same number within two hours of the newest one share a row. */
+    fun groupBursts(logs: List<DialLogEntry>): List<RecentBurst> {
+        val groups = mutableListOf<BurstBuilder>()
+        for (entry in logs) {
+            val match = groups.lastOrNull { group ->
+                group.open && sameBurstNumber(group.latest.number, entry.number)
+            }
+            if (match != null && match.latest.atMillis - entry.atMillis <= BURST_WINDOW_MS) {
+                match.calls += entry
+            } else {
+                groups.filter { sameBurstNumber(it.latest.number, entry.number) }.forEach { it.open = false }
+                groups += BurstBuilder(entry)
+            }
+        }
+        return groups.map { RecentBurst(it.calls.first(), it.calls.toList()) }
+    }
+
     fun matchesFilter(entry: DialLogEntry, filter: LogFilter): Boolean = when (filter) {
         LogFilter.ALL -> true
         LogFilter.INCOMING -> !entry.blocked && entry.type == CallLog.Calls.INCOMING_TYPE
@@ -106,6 +132,21 @@ object DialLogMerger {
             entry.number.contains(q, ignoreCase = true) ||
             (digits.isNotEmpty() && NumberMatcher.extractNumber(entry.number).contains(digits)) ||
             (entry.matchedPrefix?.contains(q, ignoreCase = true) == true)
+    }
+
+    private fun sameBurstNumber(a: String, b: String): Boolean {
+        val left = NumberMatcher.extractNumber(a)
+        val right = NumberMatcher.extractNumber(b)
+        if (left.length < 3 || right.length < 3) return false
+        if (left == right) return true
+        val keep = min(10, min(left.length, right.length))
+        return keep >= 7 && left.takeLast(keep) == right.takeLast(keep)
+    }
+
+    private class BurstBuilder(first: DialLogEntry) {
+        val latest = first
+        val calls = mutableListOf(first)
+        var open = true
     }
 
     private fun sameCaller(logDigits: String, blockedNumber: String): Boolean {

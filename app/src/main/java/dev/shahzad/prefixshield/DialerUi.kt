@@ -9,17 +9,16 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -27,7 +26,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -53,7 +51,6 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Dialpad
 import androidx.compose.material.icons.outlined.History
-import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Notifications
@@ -61,6 +58,7 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.PhoneDisabled
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Tag
@@ -78,8 +76,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -106,6 +102,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -161,10 +158,10 @@ fun DialerApp(
     onCopyNumber: (String) -> Unit,
     onBlockNumber: (String) -> Unit,
     onUnblockNumber: (String) -> Unit,
-    onDeleteLog: (DialLogEntry) -> Unit,
+    onDeleteLog: (List<DialLogEntry>) -> Unit,
     onClearHistory: () -> Unit,
-    onSaveContact: (String, String, ContactAccount) -> Unit,
-    onUpdateContact: (DeviceContact, String, String) -> Unit,
+    onSaveContact: (ContactDraft) -> Unit,
+    onUpdateContact: (DeviceContact, ContactDraft) -> Unit,
     onDeleteContact: (DeviceContact) -> Unit,
     onToggleContactStar: (DeviceContact) -> Unit,
     onAddPrefix: () -> Unit,
@@ -180,9 +177,8 @@ fun DialerApp(
     onDismissUpdate: () -> Unit
 ) {
     var tab by remember { mutableIntStateOf(0) }
-    var drawerOpen by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
-    var confirmClear by remember { mutableStateOf(false) }
+    var settingsBack by remember { mutableStateOf("Recents") }
     var showDefaultPrompt by remember { mutableStateOf(false) }
     var showDialer by remember { mutableStateOf(false) }
     var selectedLog by remember { mutableStateOf<DialLogEntry?>(null) }
@@ -201,8 +197,9 @@ fun DialerApp(
             showDialer = true
         }
     }
-    BackHandler(enabled = selectedLog != null) { selectedLog = null }
-    BackHandler(enabled = showDialer && selectedLog == null) { showDialer = false }
+    BackHandler(enabled = selectedLog != null && !showSettings) { selectedLog = null }
+    BackHandler(enabled = showDialer && selectedLog == null && !showSettings) { showDialer = false }
+    BackHandler(enabled = showSettings) { showSettings = false }
     LaunchedEffect(dialerEnabled, promptDefaultDialer) {
         if (!dialerEnabled && promptDefaultDialer) {
             kotlinx.coroutines.delay(700)
@@ -265,7 +262,9 @@ fun DialerApp(
                     onPrefixInputChange = onPrefixInputChange,
                     rules = rules,
                     totalBlockedCount = totalBlockedCount,
+                    backLabel = settingsBack,
                     onBack = { showSettings = false },
+                    onClearHistory = onClearHistory,
                     onEnableScreening = onEnableScreening,
                     onEnableDialer = onEnableDialer,
                     onToggleBlocking = onToggleBlocking,
@@ -278,8 +277,7 @@ fun DialerApp(
                     appVersionCode = appVersionCode,
                     updateBusy = updateBusy,
                     updateRelease = updateRelease,
-                    onCheckUpdate = onCheckUpdate,
-                    onInstallUpdate = onInstallUpdate
+                    onCheckUpdate = onCheckUpdate
                 )
             } else if (selectedLog != null) {
                 CallDetailPage(
@@ -293,7 +291,7 @@ fun DialerApp(
                     onBlockNumber = onBlockNumber,
                     onUnblockNumber = onUnblockNumber,
                     onDeleteLog = {
-                        onDeleteLog(it)
+                        onDeleteLog(listOf(it))
                         selectedLog = null
                     }
                 )
@@ -309,7 +307,10 @@ fun DialerApp(
                     canRead = canReadCallLog,
                     onGrantAccess = onGrantPhoneAccess,
                     onVoiceSearch = onVoiceSearch,
-                    onOpenMenu = { drawerOpen = true },
+                    onOpenSettings = {
+                        settingsBack = "Recents"
+                        showSettings = true
+                    },
                     onPlaceCall = onPlaceCall,
                     onCopyNumber = onCopyNumber,
                     onBlockNumber = onBlockNumber,
@@ -328,7 +329,11 @@ fun DialerApp(
                     onUpdate = onUpdateContact,
                     onDelete = onDeleteContact,
                     onToggleStar = onToggleContactStar,
-                    onBlock = onBlockNumber
+                    onBlock = onBlockNumber,
+                    onOpenSettings = {
+                        settingsBack = "Contacts"
+                        showSettings = true
+                    }
                 )
             }
         }
@@ -336,7 +341,7 @@ fun DialerApp(
         if (!showSettings && tab == 0 && !showDialer && selectedLog == null) {
             FloatingActionButton(
                 onClick = { showDialer = true },
-                containerColor = On,
+                containerColor = Accent,
                 contentColor = Color.White,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -373,44 +378,6 @@ fun DialerApp(
                     onClose = { showDialer = false }
                 )
             }
-        }
-
-        if (drawerOpen) {
-            SideMenu(
-                appVersion = appVersion,
-                onDismiss = { drawerOpen = false },
-                onSettings = {
-                    drawerOpen = false
-                    showSettings = true
-                },
-                onClearHistory = {
-                    drawerOpen = false
-                    confirmClear = true
-                }
-            )
-        }
-
-        if (confirmClear) {
-            AlertDialog(
-                onDismissRequest = { confirmClear = false },
-                containerColor = Surface,
-                title = { Text("Clear call history?", color = TextMain) },
-                text = {
-                    Text(
-                        "This removes phone call logs and blocked history on this device.",
-                        color = TextDim
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        onClearHistory()
-                        confirmClear = false
-                    }) { Text("Clear", color = Off) }
-                },
-                dismissButton = {
-                    TextButton(onClick = { confirmClear = false }) { Text("Cancel", color = TextDim) }
-                }
-            )
         }
 
         if (showUpdateDialog && AppUpdate.isNewer(updateRelease, appVersionCode)) {
@@ -479,79 +446,20 @@ fun DialerApp(
 }
 
 @Composable
-private fun SideMenu(
-    appVersion: String,
-    onDismiss: () -> Unit,
-    onSettings: () -> Unit,
-    onClearHistory: () -> Unit
+private fun RecentMenuItem(
+    label: String,
+    icon: ImageVector,
+    tint: Color,
+    onClick: () -> Unit
 ) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.28f))
-                .clickable(onClick = onDismiss)
-        )
-        Column(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .fillMaxHeight()
-                .width(312.dp)
-                .background(Bg)
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        ) {
-            Text(
-                "Phone",
-                color = TextMain,
-                fontSize = 34.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 18.dp)
-            )
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Surface)
-            ) {
-                DrawerItem(Icons.Outlined.Settings, "Settings", onSettings)
-                HorizontalDivider(color = Line.copy(alpha = 0.65f), modifier = Modifier.padding(start = 52.dp))
-                DrawerItem(Icons.Outlined.Delete, "Clear Recents", onClearHistory)
-            }
-            Spacer(Modifier.weight(1f))
-            Text(
-                "myPhone  ·  $appVersion",
-                color = TextDim,
-                fontSize = 13.sp,
-                modifier = Modifier.padding(start = 8.dp, bottom = 12.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun DrawerItem(icon: ImageVector, label: String, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(28.dp)
-                .clip(RoundedCornerShape(7.dp))
-                .background(Accent),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-        }
-        Spacer(Modifier.width(12.dp))
-        Text(label, color = TextMain, fontSize = 17.sp, modifier = Modifier.weight(1f))
-        Text("›", color = Color(0xFFC7C7CC), fontSize = 22.sp)
-    }
+    DropdownMenuItem(
+        text = { Text(label, color = tint, fontSize = 16.sp) },
+        leadingIcon = {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+        },
+        onClick = onClick,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
+    )
 }
 
 @Composable
@@ -566,16 +474,17 @@ private fun HomeRecentsTab(
     canRead: Boolean,
     onGrantAccess: () -> Unit,
     onVoiceSearch: () -> Unit,
-    onOpenMenu: () -> Unit,
+    onOpenSettings: () -> Unit,
     onPlaceCall: (String) -> Unit,
     onCopyNumber: (String) -> Unit,
     onBlockNumber: (String) -> Unit,
     onUnblockNumber: (String) -> Unit,
-    onDeleteLog: (DialLogEntry) -> Unit,
+    onDeleteLog: (List<DialLogEntry>) -> Unit,
     onOpenDetail: (DialLogEntry) -> Unit
 ) {
     val nowMillis = remember(logs) { System.currentTimeMillis() }
-    val grouped = remember(logs) { BlockedTimeFormat.groupByDay(logs, timeOf = { it.atMillis }) }
+    val bursts = remember(logs) { DialLogMerger.groupBursts(logs) }
+    val grouped = remember(bursts) { BlockedTimeFormat.groupByDay(bursts, timeOf = { it.latest.atMillis }) }
 
     Column(
         modifier = Modifier
@@ -635,8 +544,8 @@ private fun HomeRecentsTab(
                     )
                 }
             }
-            IconButton(onClick = onOpenMenu) {
-                Icon(Icons.Outlined.Menu, contentDescription = "Menu", tint = TextMain)
+            IconButton(onClick = onOpenSettings) {
+                Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = Accent)
             }
         }
 
@@ -730,15 +639,17 @@ private fun HomeRecentsTab(
                             )
                         }
                         is DayListEntry.Item -> {
+                            val burst = entry.value
                             DialLogRow(
-                                entry = entry.value,
+                                entry = burst.latest,
+                                repeatCount = burst.count,
                                 nowMillis = nowMillis,
-                                blockedBySeries = NumberMatcher.matchingPrefix(entry.value.number, rules) != null,
+                                blockedBySeries = NumberMatcher.matchingPrefix(burst.latest.number, rules) != null,
                                 onPlaceCall = onPlaceCall,
                                 onCopyNumber = onCopyNumber,
                                 onBlockNumber = onBlockNumber,
                                 onUnblockNumber = onUnblockNumber,
-                                onDeleteLog = onDeleteLog,
+                                onDeleteLog = { onDeleteLog(burst.calls) },
                                 onOpenDetail = onOpenDetail
                             )
                             HorizontalDivider(
@@ -756,13 +667,14 @@ private fun HomeRecentsTab(
 @Composable
 private fun DialLogRow(
     entry: DialLogEntry,
+    repeatCount: Int = 1,
     nowMillis: Long,
     blockedBySeries: Boolean,
     onPlaceCall: (String) -> Unit,
     onCopyNumber: (String) -> Unit,
     onBlockNumber: (String) -> Unit,
     onUnblockNumber: (String) -> Unit,
-    onDeleteLog: (DialLogEntry) -> Unit,
+    onDeleteLog: () -> Unit,
     onOpenDetail: (DialLogEntry) -> Unit
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -780,6 +692,7 @@ private fun DialLogRow(
         else -> Icons.Outlined.Call
     }
     val initial = entry.title.firstOrNull()?.uppercaseChar()?.toString() ?: "#"
+    val countOnTitle = repeatCount > 1 && (entry.name.isNullOrBlank() || entry.number.isBlank())
     val details = buildList {
         add(entry.typeLabel)
         entry.durationLabel?.let { add(it) }
@@ -812,18 +725,39 @@ private fun DialLogRow(
             }
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    entry.title,
-                    color = if (entry.blocked || entry.type == CallLog.Calls.MISSED_TYPE) Off else TextMain,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        entry.title,
+                        color = if (entry.blocked || entry.type == CallLog.Calls.MISSED_TYPE) Off else TextMain,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (countOnTitle) {
+                        Text(
+                            " ($repeatCount)",
+                            color = if (entry.blocked || entry.type == CallLog.Calls.MISSED_TYPE) Off else TextMain,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(typeIcon, contentDescription = null, tint = typeColor, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text(details, color = TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        details,
+                        color = TextDim,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (!countOnTitle && repeatCount > 1) {
+                        Text(" ($repeatCount)", color = TextDim, fontSize = 12.sp)
+                    }
                 }
             }
             Text(
@@ -835,55 +769,44 @@ private fun DialLogRow(
                 Icon(Icons.Outlined.Call, contentDescription = "Call", tint = Accent)
             }
         }
-        DropdownMenu(
-            expanded = menu,
-            onDismissRequest = { menu = false },
-                containerColor = Surface
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .padding(horizontal = 16.dp)
         ) {
-            DropdownMenuItem(
-                text = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.ContentCopy, contentDescription = null, tint = TextMain, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(10.dp))
-                        Text("Copy", color = TextMain)
-                    }
-                },
-                onClick = {
+            DropdownMenu(
+                expanded = menu,
+                onDismissRequest = { menu = false },
+                offset = DpOffset(0.dp, 6.dp),
+                shape = RoundedCornerShape(14.dp),
+                containerColor = Surface,
+                shadowElevation = 12.dp
+            ) {
+                RecentMenuItem(
+                    label = "Copy",
+                    icon = Icons.Outlined.ContentCopy,
+                    tint = TextMain
+                ) {
                     menu = false
                     onCopyNumber(entry.number.ifBlank { entry.title })
                 }
-            )
-            DropdownMenuItem(
-                text = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            if (blockedBySeries) Icons.Outlined.Shield else Icons.Outlined.Block,
-                            contentDescription = null,
-                            tint = if (blockedBySeries) On else Off,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Text(if (blockedBySeries) "Unblock" else "Block", color = if (blockedBySeries) On else Off)
-                    }
-                },
-                onClick = {
+                RecentMenuItem(
+                    label = if (blockedBySeries) "Unblock" else "Block",
+                    icon = if (blockedBySeries) Icons.Outlined.Shield else Icons.Outlined.Block,
+                    tint = if (blockedBySeries) On else Off
+                ) {
                     menu = false
                     if (blockedBySeries) onUnblockNumber(entry.number) else onBlockNumber(entry.number)
                 }
-            )
-            DropdownMenuItem(
-                text = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.Delete, contentDescription = null, tint = Off, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(10.dp))
-                        Text("Delete", color = Off)
-                    }
-                },
-                onClick = {
+                RecentMenuItem(
+                    label = "Delete",
+                    icon = Icons.Outlined.Delete,
+                    tint = Off
+                ) {
                     menu = false
-                    onDeleteLog(entry)
+                    onDeleteLog()
                 }
-            )
+            }
         }
     }
 }
@@ -1339,7 +1262,9 @@ private fun SettingsScreen(
     onPrefixInputChange: (String) -> Unit,
     rules: List<PrefixRule>,
     totalBlockedCount: Int,
+    backLabel: String,
     onBack: () -> Unit,
+    onClearHistory: () -> Unit,
     onEnableScreening: () -> Unit,
     onEnableDialer: () -> Unit,
     onToggleBlocking: (Boolean) -> Unit,
@@ -1352,249 +1277,208 @@ private fun SettingsScreen(
     appVersionCode: Long,
     updateBusy: Boolean,
     updateRelease: AppRelease?,
-    onCheckUpdate: () -> Unit,
-    onInstallUpdate: () -> Unit
+    onCheckUpdate: () -> Unit
 ) {
     val focus = LocalFocusManager.current
     var pendingDelete by remember { mutableStateOf<PrefixRule?>(null) }
+    var confirmClear by remember { mutableStateOf(false) }
     val activeRules = rules.count { it.enabled }
+    val updateReady = AppUpdate.isNewer(updateRelease, appVersionCode)
+    val blockingFooter = when {
+        blockingOn && (screeningEnabled || dialerEnabled) ->
+            "$activeRules active series · $totalBlockedCount blocked"
+        blockingOn -> "Set the default phone app or call screening before blocking can run."
+        else -> "Blocking is paused. Incoming calls are not filtered."
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(padding)
+            .background(Bg)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
+                .padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = Accent)
             }
-            Text("Settings", color = Accent, fontSize = 17.sp)
+            Text(backLabel, color = Accent, fontSize = 17.sp)
         }
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Surface)
-                    .border(1.dp, if (blockingOn) On.copy(alpha = 0.35f) else Line, RoundedCornerShape(18.dp))
-                    .padding(16.dp)
+            Text(
+                "Settings",
+                color = TextMain,
+                fontSize = 34.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+            )
+            SettingsGroup(
+                header = "Phone",
+                footer = "myPhone needs to be the default phone app to place, answer, and silence calls."
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (blockingOn) On.copy(alpha = 0.15f) else Off.copy(alpha = 0.12f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Outlined.Security,
-                            contentDescription = null,
-                            tint = if (blockingOn) On else Off,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            if (blockingOn) "Protection active" else "Protection paused",
-                            color = TextMain,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            when {
-                                blockingOn && (screeningEnabled || dialerEnabled) ->
-                                    "$activeRules active series · $totalBlockedCount blocked total"
-                                blockingOn -> "Set default phone or screening to block calls"
-                                else -> "Blocking is paused"
-                            },
-                            color = TextDim,
-                            fontSize = 13.sp
-                        )
-                    }
-                    Switch(
-                        checked = blockingOn,
-                        onCheckedChange = onToggleBlocking,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Accent
-                        )
+                SettingsNavRow(
+                    icon = Icons.Outlined.Call,
+                    iconBg = Accent,
+                    title = "Default Phone App",
+                    value = if (dialerEnabled) "On" else "Set Up",
+                    onClick = if (dialerEnabled) null else onEnableDialer
+                )
+                SettingsDivider()
+                SettingsNavRow(
+                    icon = Icons.Outlined.Shield,
+                    iconBg = On,
+                    title = "Call Screening",
+                    value = if (screeningEnabled) "On" else "Set Up",
+                    onClick = if (screeningEnabled) null else onEnableScreening
+                )
+                if (!phoneAccessEnabled) {
+                    SettingsDivider()
+                    SettingsNavRow(
+                        icon = Icons.Outlined.Notifications,
+                        iconBg = Color(0xFFFF9500),
+                        title = "Contacts, Calls and Alerts",
+                        value = "Allow",
+                        onClick = onGrantPhoneAccess
                     )
                 }
-                if (!dialerEnabled) {
-                    Spacer(Modifier.height(12.dp))
-                    Button(
-                        onClick = onEnableDialer,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.White)
-                    ) {
-                        Icon(Icons.Outlined.Call, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Set as default phone app")
-                    }
-                }
-                if (!screeningEnabled) {
-                    Spacer(Modifier.height(12.dp))
-                    Button(
-                        onClick = onEnableScreening,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.White)
-                    ) {
-                        Icon(Icons.Outlined.Shield, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Enable call screening")
-                    }
-                }
             }
-
-            if (!phoneAccessEnabled) {
+            SettingsGroup(header = "Blocking", footer = blockingFooter) {
+                SettingsSwitchRow(
+                    icon = Icons.Outlined.Security,
+                    iconBg = if (blockingOn) Accent else TextDim,
+                    title = "Protection",
+                    checked = blockingOn,
+                    onCheckedChange = onToggleBlocking
+                )
+                SettingsDivider()
+                SettingsSwitchRow(
+                    icon = Icons.Outlined.ContactPhone,
+                    iconBg = Color(0xFFFF9500),
+                    title = "Block Saved Contacts",
+                    checked = blockSavedOn,
+                    onCheckedChange = onToggleBlockSaved
+                )
+            }
+            SettingsGroup(
+                header = "Number Series",
+                footer = "Only numbers that start with a series are blocked."
+            ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Fill)
-                        .padding(14.dp),
+                        .heightIn(min = 48.dp)
+                        .padding(start = 16.dp, end = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Outlined.Notifications, contentDescription = null, tint = Accent)
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Phone access needed", color = TextMain, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                        Text("Contacts, call log & alerts", color = TextDim, fontSize = 12.sp)
-                    }
-                    TextButton(onClick = onGrantPhoneAccess) {
-                        Text("Allow", color = Accent)
-                    }
-                }
-            }
-
-            SettingToggleCard(
-                title = "Block saved contacts",
-                subtitle = "Reject numbers already in your address book",
-                icon = Icons.Outlined.ContactPhone,
-                checked = blockSavedOn,
-                onCheckedChange = onToggleBlockSaved
-            )
-
-            Text("Number series", color = TextMain, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            Text(
-                "Only numbers that start with a series are blocked",
-                color = TextDim,
-                fontSize = 12.sp
-            )
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Surface)
-                    .padding(10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedTextField(
-                    value = prefixInput,
-                    onValueChange = onPrefixInputChange,
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                    leadingIcon = {
-                        Icon(Icons.Outlined.Tag, contentDescription = null, tint = TextDim)
-                    },
-                    placeholder = { Text("e.g. 0300") },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Phone,
-                        imeAction = ImeAction.Done
-                    ),
-                    keyboardActions = KeyboardActions(onDone = {
-                        onAddPrefix()
-                        focus.clearFocus()
-                    }),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Accent,
-                        unfocusedBorderColor = Color.Transparent,
-                        focusedContainerColor = Bg,
-                        unfocusedContainerColor = Bg,
-                        focusedTextColor = TextMain,
-                        unfocusedTextColor = TextMain,
-                        cursorColor = Accent,
-                        focusedPlaceholderColor = TextDim,
-                        unfocusedPlaceholderColor = TextDim
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                )
-                Spacer(Modifier.width(8.dp))
-                Button(
-                    onClick = {
-                        onAddPrefix()
-                        focus.clearFocus()
-                    },
-                    modifier = Modifier.height(56.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.White)
-                ) {
-                    Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(20.dp))
-                }
-            }
-
-            if (rules.isEmpty()) {
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(Icons.Outlined.Tag, contentDescription = null, tint = TextDim, modifier = Modifier.size(40.dp))
-                    Spacer(Modifier.height(8.dp))
-                    Text("No series yet", color = TextMain, fontWeight = FontWeight.Medium)
-                    Text("Add a prefix to block matching callers", color = TextDim, fontSize = 13.sp)
-                }
-            } else {
-                rules.forEach { rule ->
-                    PrefixRow(
-                        rule = rule,
-                        onToggle = { onTogglePrefix(rule.prefix, it) },
-                        onDelete = { pendingDelete = rule }
+                    BasicTextField(
+                        value = prefixInput,
+                        onValueChange = onPrefixInputChange,
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        textStyle = TextStyle(color = TextMain, fontSize = 17.sp),
+                        cursorBrush = SolidColor(Accent),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Phone,
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(onDone = {
+                            onAddPrefix()
+                            focus.clearFocus()
+                        }),
+                        decorationBox = { inner ->
+                            Box {
+                                if (prefixInput.isEmpty()) {
+                                    Text("Add a series, e.g. 0300", color = TextDim, fontSize = 17.sp)
+                                }
+                                inner()
+                            }
+                        }
                     )
+                    IconButton(onClick = {
+                        onAddPrefix()
+                        focus.clearFocus()
+                    }) {
+                        Icon(Icons.Outlined.Add, contentDescription = "Add series", tint = Accent)
+                    }
+                }
+                rules.forEach { rule ->
+                    SettingsDivider(start = 16.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .padding(start = 16.dp, end = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SettingsIcon(Icons.Outlined.Tag, if (rule.enabled) Accent else TextDim)
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            rule.prefix,
+                            color = if (rule.enabled) TextMain else TextDim,
+                            fontSize = 17.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = rule.enabled,
+                            onCheckedChange = { onTogglePrefix(rule.prefix, it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Accent
+                            )
+                        )
+                        IconButton(onClick = { pendingDelete = rule }) {
+                            Icon(
+                                Icons.Outlined.Delete,
+                                contentDescription = "Delete",
+                                tint = Off,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            Text("GENERAL", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Surface)
-                    .clickable { onCheckUpdate() }
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Software Update", color = TextMain, fontSize = 17.sp, modifier = Modifier.weight(1f))
-                Text(
-                    when {
+            SettingsGroup(header = "General") {
+                SettingsNavRow(
+                    icon = Icons.Outlined.SystemUpdate,
+                    iconBg = Accent,
+                    title = "Software Update",
+                    value = when {
                         updateBusy -> "Checking…"
-                        (updateRelease?.versionCode ?: 0) > appVersionCode &&
-                            updateRelease?.apkUrl?.isNotBlank() == true -> updateRelease?.versionName ?: "Available"
-                        updateRelease != null -> "Up to Date"
+                        updateReady -> updateRelease?.versionName ?: "Available"
                         else -> appVersion
                     },
-                    color = TextDim,
-                    fontSize = 16.sp
+                    valueColor = if (updateReady) Accent else TextDim,
+                    onClick = onCheckUpdate
                 )
-                Spacer(Modifier.width(6.dp))
-                Text("›", color = Color(0xFFC7C7CC), fontSize = 20.sp)
             }
-            Spacer(Modifier.height(16.dp))
+            SettingsGroup(header = "Recents") {
+                Text(
+                    "Clear Recents",
+                    color = Off,
+                    fontSize = 17.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { confirmClear = true }
+                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                )
+            }
+            Text(
+                "myPhone $appVersion",
+                color = TextDim,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 22.dp, bottom = 28.dp)
+            )
         }
     }
 
@@ -1614,126 +1498,128 @@ private fun SettingsScreen(
             }
         )
     }
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            containerColor = Surface,
+            title = { Text("Clear call history?", color = TextMain) },
+            text = {
+                Text(
+                    "This removes phone call logs and blocked history on this device.",
+                    color = TextDim
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onClearHistory()
+                    confirmClear = false
+                }) { Text("Clear", color = Off) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClear = false }) { Text("Cancel", color = TextDim) }
+            }
+        )
+    }
 }
 
 @Composable
-private fun PrefixRow(
-    rule: PrefixRule,
-    onToggle: (Boolean) -> Unit,
-    onDelete: () -> Unit
+private fun SettingsGroup(
+    header: String? = null,
+    footer: String? = null,
+    content: @Composable ColumnScope.() -> Unit
 ) {
-    var menuOpen by remember { mutableStateOf(false) }
+    if (header != null) {
+        Text(
+            header.uppercase(),
+            color = TextDim,
+            fontSize = 13.sp,
+            modifier = Modifier.padding(start = 32.dp, end = 32.dp, top = 22.dp, bottom = 7.dp)
+        )
+    } else {
+        Spacer(Modifier.height(22.dp))
+    }
+    Column(
+        modifier = Modifier
+            .padding(horizontal = 16.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Surface),
+        content = content
+    )
+    if (footer != null) {
+        Text(
+            footer,
+            color = TextDim,
+            fontSize = 13.sp,
+            modifier = Modifier.padding(start = 32.dp, end = 32.dp, top = 7.dp)
+        )
+    }
+}
+
+@Composable
+private fun SettingsDivider(start: androidx.compose.ui.unit.Dp = 58.dp) {
+    HorizontalDivider(color = Line.copy(alpha = 0.7f), modifier = Modifier.padding(start = start))
+}
+
+@Composable
+private fun SettingsIcon(icon: ImageVector, background: Color) {
+    Box(
+        modifier = Modifier
+            .size(29.dp)
+            .clip(RoundedCornerShape(7.dp))
+            .background(background),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
+    }
+}
+
+@Composable
+private fun SettingsNavRow(
+    icon: ImageVector,
+    iconBg: Color,
+    title: String,
+    value: String,
+    valueColor: Color = TextDim,
+    onClick: (() -> Unit)?
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Surface)
-            .padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+            .heightIn(min = 48.dp)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(if (rule.enabled) Accent.copy(alpha = 0.18f) else Fill),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Outlined.Tag,
-                contentDescription = null,
-                tint = if (rule.enabled) Accent else TextDim,
-                modifier = Modifier.size(18.dp)
-            )
-        }
+        SettingsIcon(icon, iconBg)
         Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                rule.prefix,
-                color = if (rule.enabled) TextMain else TextDim,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Text(if (rule.enabled) "Active" else "Paused", color = TextDim, fontSize = 12.sp)
-        }
-        Box {
-            IconButton(onClick = { menuOpen = true }) {
-                Icon(Icons.Outlined.MoreVert, contentDescription = "More", tint = TextDim)
-            }
-            DropdownMenu(
-                expanded = menuOpen,
-                onDismissRequest = { menuOpen = false },
-                containerColor = Surface
-            ) {
-                DropdownMenuItem(
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (rule.enabled) "On" else "Off", color = TextMain, modifier = Modifier.weight(1f))
-                            Switch(
-                                checked = rule.enabled,
-                                onCheckedChange = {
-                                    onToggle(it)
-                                    menuOpen = false
-                                },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = Accent
-                                )
-                            )
-                        }
-                    },
-                    onClick = {
-                        onToggle(!rule.enabled)
-                        menuOpen = false
-                    }
-                )
-                DropdownMenuItem(
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Outlined.Delete, contentDescription = null, tint = Off)
-                            Spacer(Modifier.width(10.dp))
-                            Text("Delete", color = Off)
-                        }
-                    },
-                    onClick = {
-                        menuOpen = false
-                        onDelete()
-                    }
-                )
-            }
+        Text(title, color = TextMain, fontSize = 17.sp, modifier = Modifier.weight(1f))
+        Text(value, color = valueColor, fontSize = 16.sp)
+        if (onClick != null) {
+            Spacer(Modifier.width(6.dp))
+            Text("›", color = Color(0xFFC7C7CC), fontSize = 22.sp)
         }
     }
 }
 
 @Composable
-private fun SettingToggleCard(
-    title: String,
-    subtitle: String,
+private fun SettingsSwitchRow(
     icon: ImageVector,
+    iconBg: Color,
+    title: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Surface)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .heightIn(min = 48.dp)
+            .padding(start = 16.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Accent.copy(alpha = 0.12f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(icon, contentDescription = null, tint = Accent, modifier = Modifier.size(20.dp))
-        }
+        SettingsIcon(icon, iconBg)
         Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            Text(subtitle, color = TextDim, fontSize = 12.sp)
-        }
+        Text(title, color = TextMain, fontSize = 17.sp, modifier = Modifier.weight(1f))
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
