@@ -134,14 +134,7 @@ object DialLogMerger {
             (entry.matchedPrefix?.contains(q, ignoreCase = true) == true)
     }
 
-    private fun sameBurstNumber(a: String, b: String): Boolean {
-        val left = NumberMatcher.extractNumber(a)
-        val right = NumberMatcher.extractNumber(b)
-        if (left.length < 3 || right.length < 3) return false
-        if (left == right) return true
-        val keep = min(10, min(left.length, right.length))
-        return keep >= 7 && left.takeLast(keep) == right.takeLast(keep)
-    }
+    private fun sameBurstNumber(a: String, b: String): Boolean = NumberMatcher.samePhone(a, b)
 
     private class BurstBuilder(first: DialLogEntry) {
         val latest = first

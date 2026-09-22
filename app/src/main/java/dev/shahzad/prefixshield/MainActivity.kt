@@ -36,6 +36,33 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
     private val app get() = application as PrefixShieldApp
 
+    private val exportContacts = registerForActivityResult(ActivityResultContracts.CreateDocument("text/vcard")) { uri ->
+        if (uri == null) return@registerForActivityResult
+        runCatching {
+            contentResolver.openOutputStream(uri)?.use { stream ->
+                stream.write(ContactVCard.export(contacts).toByteArray())
+            }
+            Toast.makeText(this, "Contacts exported", Toast.LENGTH_SHORT).show()
+        }.onFailure {
+            Toast.makeText(this, "Could not export contacts", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private val importContacts = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val text = runCatching {
+            contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+        }.getOrNull().orEmpty()
+        val drafts = ContactVCard.parse(text)
+        val saved = drafts.count { ContactStore.insert(this, it) }
+        Toast.makeText(
+            this,
+            if (saved > 0) "Imported $saved contacts" else "No contacts found in that file",
+            Toast.LENGTH_SHORT
+        ).show()
+        refresh()
+    }
+
     private var screeningEnabled by mutableStateOf(false)
     private var dialerEnabled by mutableStateOf(false)
     private var blockingOn by mutableStateOf(true)
@@ -185,7 +212,11 @@ class MainActivity : ComponentActivity() {
                     showUpdateDialog = showUpdateDialog,
                     onCheckUpdate = { checkForUpdate(false) },
                     onInstallUpdate = ::installUpdate,
-                    onDismissUpdate = { showUpdateDialog = false }
+                    onDismissUpdate = { showUpdateDialog = false },
+                    onExportContacts = { exportContacts.launch("myphone-contacts.vcf") },
+                    onImportContacts = {
+                        importContacts.launch(arrayOf("text/vcard", "text/x-vcard", "text/plain", "*/*"))
+                    }
                 )
             }
         }

@@ -1,6 +1,14 @@
 package dev.shahzad.prefixshield
 
 object NumberMatcher {
+    fun samePhone(a: String?, b: String?): Boolean {
+        val left = extractNumber(a)
+        val right = extractNumber(b)
+        if (left.length < 7 || right.length < 7) return false
+        if (left == right) return true
+        return left.length >= 10 && right.length >= 10 && left.takeLast(10) == right.takeLast(10)
+    }
+
     fun digitsOnly(value: String): String = buildString(value.length) {
         for (ch in value) {
             val digit = Character.digit(ch, 10)

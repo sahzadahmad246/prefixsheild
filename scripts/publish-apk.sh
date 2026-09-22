@@ -19,7 +19,7 @@ NOTES="$(cat <<EOF
 versionCode: ${CODE}
 versionName: ${NAME}
 
-Apple-style incoming call, in-call screen, and call banners.
+Fixed call history, dialer, contact form, and slide-to-answer calls.
 EOF
 )"
 gh release delete "$TAG" -y >/dev/null 2>&1 || true
@@ -33,7 +33,7 @@ manifest = {
     "versionCode": int(code),
     "versionName": name,
     "apkUrl": f"https://github.com/sahzadahmad246/prefixsheild/releases/download/{tag}/app-release.apk",
-    "notes": "Apple-style incoming call, in-call screen, and call banners.",
+    "notes": "Fixed call history, dialer, contact form, and slide-to-answer calls.",
 }
 with open("update.json", "w", encoding="utf-8") as out:
     json.dump(manifest, out, indent=2)

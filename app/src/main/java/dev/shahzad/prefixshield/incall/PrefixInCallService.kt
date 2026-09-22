@@ -2,6 +2,7 @@ package dev.shahzad.prefixshield.incall
 
 import android.app.KeyguardManager
 import android.content.BroadcastReceiver
+import android.os.PowerManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -23,6 +24,7 @@ class PrefixInCallService : InCallService() {
         }
     }
     private var receiverRegistered = false
+    private var proximityLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent): android.os.IBinder? {
         val binder = super.onBind(intent)
@@ -44,6 +46,7 @@ class PrefixInCallService : InCallService() {
             unregisterReceiver(screenOffReceiver)
             receiverRegistered = false
         }
+        setProximity(false)
         return super.onUnbind(intent)
     }
 
@@ -85,6 +88,7 @@ class PrefixInCallService : InCallService() {
 
     private fun refreshChrome() {
         val model = CallSession.ui.value
+        setProximity(model.hasCall && model.audioRoute == CallAudioState.ROUTE_EARPIECE)
         if (!model.hasCall) {
             CallRingtone.stop()
             CallRingtone.resetSilence()
@@ -96,6 +100,20 @@ class PrefixInCallService : InCallService() {
             CallRingtone.start(this)
         } else {
             CallRingtone.stop()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun setProximity(enabled: Boolean) {
+        val lock = proximityLock ?: runCatching {
+            getSystemService(PowerManager::class.java)
+                .newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "myPhone:proximity")
+                .also { it.setReferenceCounted(false) }
+        }.getOrNull()?.also { proximityLock = it } ?: return
+        if (enabled) {
+            if (!lock.isHeld) lock.acquire()
+        } else if (lock.isHeld) {
+            lock.release()
         }
     }
 

@@ -19,7 +19,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -32,6 +35,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
@@ -182,25 +187,39 @@ private fun InCallScreen(model: CallUiModel) {
                     keypad = !keypad
                 }
                 Box {
-                    IosAction(audioIcon(model.audioRoute), model.audioLabel.lowercase(), model.audioRoute != CallAudioState.ROUTE_EARPIECE) {
-                        audioMenu = true
+                    val extraRoute = model.audioOptions.any {
+                        it.route == CallAudioState.ROUTE_BLUETOOTH || it.route == CallAudioState.ROUTE_WIRED_HEADSET
                     }
-                    DropdownMenu(
-                        expanded = audioMenu,
-                        onDismissRequest = { audioMenu = false },
-                        containerColor = CallGray
-                    ) {
-                        model.audioOptions.forEach { option ->
-                            DropdownMenuItem(
-                                text = { Text(option.label, color = CallWhite) },
-                                onClick = {
-                                    audioMenu = false
-                                    CallSession.setAudioRoute(option.route)
-                                },
-                                leadingIcon = {
-                                    Icon(audioIcon(option.route), contentDescription = null, tint = CallWhite)
-                                }
-                            )
+                    IosAction(audioIcon(model.audioRoute), model.audioLabel.lowercase(), model.audioRoute != CallAudioState.ROUTE_EARPIECE) {
+                        if (extraRoute) {
+                            audioMenu = true
+                        } else {
+                            val next = if (model.audioRoute == CallAudioState.ROUTE_SPEAKER) {
+                                CallAudioState.ROUTE_EARPIECE
+                            } else {
+                                CallAudioState.ROUTE_SPEAKER
+                            }
+                            CallSession.setAudioRoute(next)
+                        }
+                    }
+                    if (extraRoute) {
+                        DropdownMenu(
+                            expanded = audioMenu,
+                            onDismissRequest = { audioMenu = false },
+                            containerColor = CallGray
+                        ) {
+                            model.audioOptions.forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option.label, color = CallWhite) },
+                                    onClick = {
+                                        audioMenu = false
+                                        CallSession.setAudioRoute(option.route)
+                                    },
+                                    leadingIcon = {
+                                        Icon(audioIcon(option.route), contentDescription = null, tint = CallWhite)
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -220,15 +239,39 @@ private fun InCallScreen(model: CallUiModel) {
         }
 
         if (model.incoming && model.state == Call.STATE_RINGING) {
-            IosCallButton(Icons.Filled.CallEnd, CallRed, "Decline") {
-                CallRingtone.stop()
-                CallSession.reject()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf("Can't talk now", "I'll call you later", "I'm busy").forEach { message ->
+                    Text(
+                        message,
+                        color = CallWhite,
+                        fontSize = 14.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(CallGray)
+                            .clickable {
+                                CallRingtone.stop()
+                                CallSession.rejectWithMessage(message)
+                            }
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
             }
-            Spacer(Modifier.height(28.dp))
-            SlideToAnswer {
-                CallRingtone.stop()
-                CallSession.answer()
-            }
+            Spacer(Modifier.height(18.dp))
+            SlideToAnswer(
+                onAnswer = {
+                    CallRingtone.stop()
+                    CallSession.answer()
+                },
+                onDecline = {
+                    CallRingtone.stop()
+                    CallSession.reject()
+                }
+            )
         } else {
             IosCallButton(Icons.Filled.CallEnd, CallRed, "End") { CallSession.hangup() }
         }
@@ -237,45 +280,80 @@ private fun InCallScreen(model: CallUiModel) {
 }
 
 @Composable
-private fun SlideToAnswer(onAnswer: () -> Unit) {
+private fun SlideToAnswer(onAnswer: () -> Unit, onDecline: () -> Unit) {
     var drag by remember { mutableFloatStateOf(0f) }
+    val nudge = rememberInfiniteTransition(label = "slide")
+    val shift by nudge.animateFloat(
+        initialValue = 0f,
+        targetValue = 10f,
+        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+        label = "nudge"
+    )
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .height(64.dp)
-            .clip(RoundedCornerShape(32.dp))
+            .height(72.dp)
+            .clip(RoundedCornerShape(36.dp))
             .background(Color(0xFF1C1C1E))
     ) {
-        val travel = with(LocalDensity.current) { (maxWidth - 64.dp).toPx().coerceAtLeast(1f) }
-        Text(
-            "slide to answer",
-            color = CallDim,
-            fontSize = 17.sp,
-            modifier = Modifier
-                .align(Alignment.Center)
-                .graphicsLayer { alpha = (1f - drag / travel).coerceIn(0f, 1f) }
-        )
+        val travel = with(LocalDensity.current) { ((maxWidth - 72.dp) / 2).toPx().coerceAtLeast(1f) }
+        val answered = drag > 8f
+        val ending = drag < -8f
+        Row(
+            modifier = Modifier.align(Alignment.CenterStart).padding(start = 78.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                contentDescription = null,
+                tint = CallRed,
+                modifier = Modifier.graphicsLayer { translationX = if (drag == 0f) -shift else 0f }
+            )
+            Text("slide to end", color = if (ending) CallRed else CallDim, fontSize = 15.sp)
+        }
+        Row(
+            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 78.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("slide to answer", color = if (answered) CallGreen else CallDim, fontSize = 15.sp)
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = CallGreen,
+                modifier = Modifier.graphicsLayer { translationX = if (drag == 0f) shift else 0f }
+            )
+        }
         Box(
             modifier = Modifier
-                .padding(4.dp)
-                .offset { IntOffset(drag.roundToInt(), 0) }
+                .align(Alignment.CenterStart)
+                .padding(8.dp)
+                .offset { IntOffset((travel + drag).roundToInt(), 0) }
                 .size(56.dp)
                 .clip(CircleShape)
-                .background(CallGreen)
+                .background(if (ending) CallRed else CallGreen)
                 .pointerInput(travel) {
                     detectHorizontalDragGestures(
                         onHorizontalDrag = { _, delta ->
-                            drag = (drag + delta).coerceIn(0f, travel)
+                            drag = (drag + delta).coerceIn(-travel, travel)
                         },
                         onDragEnd = {
-                            if (drag > travel * 0.72f) onAnswer() else drag = 0f
+                            when {
+                                drag > travel * 0.62f -> onAnswer()
+                                drag < -travel * 0.62f -> onDecline()
+                                else -> drag = 0f
+                            }
                         },
                         onDragCancel = { drag = 0f }
                     )
                 },
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Filled.Call, contentDescription = "Answer", tint = CallWhite, modifier = Modifier.size(28.dp))
+            Icon(
+                if (ending) Icons.Filled.CallEnd else Icons.Filled.Call,
+                contentDescription = "Slide",
+                tint = CallWhite,
+                modifier = Modifier.size(28.dp)
+            )
         }
     }
 }

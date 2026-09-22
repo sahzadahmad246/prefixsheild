@@ -106,6 +106,10 @@ object CallSession {
         primary()?.reject(false, null)
     }
 
+    fun rejectWithMessage(message: String) {
+        primary()?.reject(message.isNotBlank(), message.ifBlank { null })
+    }
+
     fun hangup() {
         primary()?.disconnect()
     }

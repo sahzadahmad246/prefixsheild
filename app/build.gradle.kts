@@ -12,8 +12,8 @@ android {
         applicationId = "dev.shahzad.prefixshield"
         minSdk = 29
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.5.0"
+        versionCode = 7
+        versionName = "1.6.0"
     }
 
     buildTypes {
@@ -62,4 +62,5 @@ dependencies {
     implementation("androidx.compose.ui:ui:1.7.6")
     implementation("androidx.compose.material3:material3:1.3.1")
     implementation("androidx.compose.material:material-icons-extended:1.7.6")
+    implementation("com.google.zxing:core:3.5.3")
 }

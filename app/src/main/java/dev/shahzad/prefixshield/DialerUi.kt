@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -57,6 +58,7 @@ import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.PhoneDisabled
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Settings
@@ -174,10 +176,13 @@ fun DialerApp(
     showUpdateDialog: Boolean,
     onCheckUpdate: () -> Unit,
     onInstallUpdate: () -> Unit,
-    onDismissUpdate: () -> Unit
+    onDismissUpdate: () -> Unit,
+    onExportContacts: () -> Unit,
+    onImportContacts: () -> Unit
 ) {
     var tab by remember { mutableIntStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
+    var saveNumber by remember { mutableStateOf("") }
     var settingsBack by remember { mutableStateOf("Recents") }
     var showDefaultPrompt by remember { mutableStateOf(false) }
     var showDialer by remember { mutableStateOf(false) }
@@ -277,19 +282,27 @@ fun DialerApp(
                     appVersionCode = appVersionCode,
                     updateBusy = updateBusy,
                     updateRelease = updateRelease,
-                    onCheckUpdate = onCheckUpdate
+                    onCheckUpdate = onCheckUpdate,
+                    onExportContacts = onExportContacts,
+                    onImportContacts = onImportContacts
                 )
             } else if (selectedLog != null) {
                 CallDetailPage(
                     padding = padding,
                     entry = selectedLog!!,
                     logs = logs,
+                    contacts = contacts,
                     blockedBySeries = NumberMatcher.matchingPrefix(selectedLog!!.number, rules) != null,
                     onBack = { selectedLog = null },
                     onPlaceCall = onPlaceCall,
                     onCopyNumber = onCopyNumber,
                     onBlockNumber = onBlockNumber,
                     onUnblockNumber = onUnblockNumber,
+                    onSaveNumber = { number ->
+                        saveNumber = number
+                        selectedLog = null
+                        tab = 1
+                    },
                     onDeleteLog = {
                         onDeleteLog(listOf(it))
                         selectedLog = null
@@ -330,6 +343,8 @@ fun DialerApp(
                     onDelete = onDeleteContact,
                     onToggleStar = onToggleContactStar,
                     onBlock = onBlockNumber,
+                    prefillNumber = saveNumber,
+                    onPrefillConsumed = { saveNumber = "" },
                     onOpenSettings = {
                         settingsBack = "Contacts"
                         showSettings = true
@@ -359,14 +374,8 @@ fun DialerApp(
             exit = fadeOut(tween(160))
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.32f))
-                        .clickable { showDialer = false }
-                )
                 DialPadSheet(
-                    modifier = Modifier.align(Alignment.BottomCenter),
+                    modifier = Modifier.fillMaxSize(),
                     seedDigits = pendingDialDigits,
                     onSeedConsumed = onPendingDialConsumed,
                     contacts = contacts,
@@ -817,12 +826,14 @@ private fun CallDetailPage(
     padding: PaddingValues,
     entry: DialLogEntry,
     logs: List<DialLogEntry>,
+    contacts: List<DeviceContact>,
     blockedBySeries: Boolean,
     onBack: () -> Unit,
     onPlaceCall: (String) -> Unit,
     onCopyNumber: (String) -> Unit,
     onBlockNumber: (String) -> Unit,
     onUnblockNumber: (String) -> Unit,
+    onSaveNumber: (String) -> Unit,
     onDeleteLog: (DialLogEntry) -> Unit
 ) {
     val nowMillis = remember(logs) { System.currentTimeMillis() }
@@ -834,6 +845,10 @@ private fun CallDetailPage(
     val missedCount = related.count { !it.blocked && it.type == CallLog.Calls.MISSED_TYPE }
     val blockedCount = related.count { it.blocked }
     val subtitle = entry.number.ifBlank { entry.typeLabel }
+    val saved = remember(entry.number, contacts) {
+        contacts.any { contact -> contact.numbers.any { NumberMatcher.samePhone(it, entry.number) } }
+    }
+    var share by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -902,6 +917,12 @@ private fun CallDetailPage(
                     modifier = Modifier.weight(1f)
                 ) { onCopyNumber(entry.number.ifBlank { entry.title }) }
                 DetailAction(
+                    icon = Icons.Outlined.Share,
+                    label = "share",
+                    tint = Accent,
+                    modifier = Modifier.weight(1f)
+                ) { share = true }
+                DetailAction(
                     icon = if (blockedBySeries) Icons.Outlined.Shield else Icons.Outlined.Block,
                     label = if (blockedBySeries) "unblock" else "block",
                     tint = if (blockedBySeries) On else Off,
@@ -909,6 +930,22 @@ private fun CallDetailPage(
                 ) {
                     if (blockedBySeries) onUnblockNumber(entry.number) else onBlockNumber(entry.number)
                 }
+            }
+            if (!saved && entry.number.isNotBlank()) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Add to Contacts",
+                    color = Accent,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Surface)
+                        .clickable { onSaveNumber(entry.number) }
+                        .padding(vertical = 14.dp)
+                )
             }
             Spacer(Modifier.height(18.dp))
             Column(
@@ -961,6 +998,13 @@ private fun CallDetailPage(
             }
             Spacer(Modifier.height(28.dp))
         }
+    }
+    if (share && entry.number.isNotBlank()) {
+        ShareQrDialog(
+            title = entry.title,
+            payload = entry.number,
+            onDismiss = { share = false }
+        )
     }
 }
 
@@ -1063,14 +1107,7 @@ private fun CallHistoryLine(
 }
 
 private fun sameCallerForDetails(seed: DialLogEntry, other: DialLogEntry): Boolean {
-    val a = NumberMatcher.extractNumber(seed.number)
-    val b = NumberMatcher.extractNumber(other.number)
-    if (a.isNotBlank() && b.isNotBlank()) {
-        if (a == b) return true
-        val keep = minOf(10, a.length, b.length)
-        if (keep >= 7 && a.takeLast(keep) == b.takeLast(keep)) return true
-    }
-    return seed.name?.takeIf { it.isNotBlank() } == other.name?.takeIf { it.isNotBlank() }
+    return NumberMatcher.samePhone(seed.number, other.number)
 }
 
 private fun formatDuration(seconds: Long): String {
@@ -1121,64 +1158,80 @@ private fun DialPadSheet(
 
     Column(
         modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+            .fillMaxSize()
             .background(Bg)
+            .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .padding(bottom = 8.dp)
-                .size(width = 36.dp, height = 5.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .background(Fill)
-                .clickable(onClick = onClose)
-        )
-        if (suggestions.isNotEmpty()) {
-            Column(
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 168.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Surface)
-            ) {
-                suggestions.forEachIndexed { index, item ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onPlaceCall(item.primaryNumber) }
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                item.name,
-                                color = TextMain,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(item.primaryNumber, color = TextDim, fontSize = 13.sp, maxLines = 1)
-                        }
-                        Icon(Icons.Outlined.Call, contentDescription = "Call", tint = On, modifier = Modifier.size(20.dp))
-                    }
-                    if (index < suggestions.lastIndex) {
-                        HorizontalDivider(color = Line.copy(alpha = 0.55f), modifier = Modifier.padding(start = 14.dp))
-                    }
+                    .padding(bottom = 8.dp)
+                    .size(width = 36.dp, height = 5.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Fill)
+                    .clickable(onClick = onClose)
+            )
+        }
+        Text(
+            if (digits.isBlank()) "Recents" else "Matches",
+            color = TextDim,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 8.dp, bottom = 6.dp)
+        )
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(Surface)
+        ) {
+            if (suggestions.isEmpty()) {
+                item {
+                    Text(
+                        "No matches",
+                        color = TextDim,
+                        fontSize = 15.sp,
+                        modifier = Modifier.padding(16.dp)
+                    )
                 }
             }
-            Spacer(Modifier.height(8.dp))
+            items(suggestions, key = { it.contactId.toString() + it.primaryNumber }) { item ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onPlaceCall(item.primaryNumber) }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            item.name,
+                            color = TextMain,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (item.name != item.primaryNumber) {
+                            Text(item.primaryNumber, color = TextDim, fontSize = 13.sp, maxLines = 1)
+                        }
+                    }
+                    Icon(Icons.Outlined.Call, contentDescription = "Call", tint = Accent, modifier = Modifier.size(20.dp))
+                }
+            }
         }
+        Spacer(Modifier.height(8.dp))
         Text(
             text = digits.ifEmpty { " " },
             color = TextMain,
             fontSize = if (digits.length > 13) 26.sp else 34.sp,
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.Center,
-            maxLines = 1
+            maxLines = 1,
+            modifier = Modifier.fillMaxWidth()
         )
         Spacer(Modifier.height(6.dp))
         keys.chunked(3).forEach { row ->
@@ -1278,7 +1331,9 @@ private fun SettingsScreen(
     appVersionCode: Long,
     updateBusy: Boolean,
     updateRelease: AppRelease?,
-    onCheckUpdate: () -> Unit
+    onCheckUpdate: () -> Unit,
+    onExportContacts: () -> Unit,
+    onImportContacts: () -> Unit
 ) {
     val focus = LocalFocusManager.current
     var pendingDelete by remember { mutableStateOf<PrefixRule?>(null) }
@@ -1301,26 +1356,19 @@ private fun SettingsScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 2.dp),
+                .padding(start = 4.dp, end = 16.dp, top = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = Accent)
             }
-            Text(backLabel, color = Accent, fontSize = 17.sp)
+            Text("Settings", color = TextMain, fontSize = 28.sp, fontWeight = FontWeight.Bold)
         }
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
         ) {
-            Text(
-                "Settings",
-                color = TextMain,
-                fontSize = 34.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
-            )
             SettingsGroup(
                 header = "Phone",
                 footer = "myPhone needs to be the default phone app to place, answer, and silence calls."
@@ -1370,7 +1418,7 @@ private fun SettingsScreen(
             }
             SettingsGroup(
                 header = "Number Series",
-                footer = "Only numbers that start with a series are blocked."
+                footer = "Numbers starting with a series are blocked."
             ) {
                 Row(
                     modifier = Modifier
@@ -1435,16 +1483,33 @@ private fun SettingsScreen(
                                 checkedTrackColor = Accent
                             )
                         )
-                        IconButton(onClick = { pendingDelete = rule }) {
-                            Icon(
-                                Icons.Outlined.Delete,
-                                contentDescription = "Delete",
-                                tint = Off,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
+                        Text(
+                            "Delete",
+                            color = Off,
+                            fontSize = 15.sp,
+                            modifier = Modifier
+                                .clickable { pendingDelete = rule }
+                                .padding(horizontal = 8.dp, vertical = 8.dp)
+                        )
                     }
                 }
+            }
+            SettingsGroup(header = "Contacts") {
+                SettingsNavRow(
+                    icon = Icons.Outlined.Share,
+                    iconBg = Accent,
+                    title = "Export Contacts",
+                    value = "vCard",
+                    onClick = onExportContacts
+                )
+                SettingsDivider()
+                SettingsNavRow(
+                    icon = Icons.Outlined.Person,
+                    iconBg = Accent,
+                    title = "Import Contacts",
+                    value = "vCard",
+                    onClick = onImportContacts
+                )
             }
             SettingsGroup(header = "General") {
                 SettingsNavRow(

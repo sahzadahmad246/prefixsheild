@@ -244,7 +244,7 @@ object ContactStore {
                 val number = log.number
                 if (number.isBlank()) return@mapNotNull null
                 DeviceContact(0L, log.name?.takeIf { it.isNotBlank() } ?: number, listOf(number), false)
-            }.distinctBy { NumberMatcher.extractNumber(it.primaryNumber) }.take(5)
+            }.distinctBy { NumberMatcher.extractNumber(it.primaryNumber) }.take(40)
         }
         fun matches(number: String): Boolean {
             val n = NumberMatcher.extractNumber(number)

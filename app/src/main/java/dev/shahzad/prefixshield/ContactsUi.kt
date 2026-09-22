@@ -94,12 +94,24 @@ fun ContactsTab(
     onDelete: (DeviceContact) -> Unit,
     onToggleStar: (DeviceContact) -> Unit,
     onBlock: (String) -> Unit,
+    prefillNumber: String = "",
+    onPrefillConsumed: () -> Unit = {},
     onOpenSettings: () -> Unit
 ) {
     var query by remember { mutableStateOf("") }
     var editor by remember { mutableStateOf<DeviceContact?>(null) }
     var creating by remember { mutableStateOf(false) }
+    var seedNumber by remember { mutableStateOf("") }
     var detail by remember { mutableStateOf<DeviceContact?>(null) }
+
+    LaunchedEffect(prefillNumber) {
+        if (prefillNumber.isNotBlank()) {
+            seedNumber = prefillNumber
+            creating = true
+            editor = null
+            onPrefillConsumed()
+        }
+    }
 
     LaunchedEffect(contacts) {
         val current = detail ?: return@LaunchedEffect
@@ -134,6 +146,7 @@ fun ContactsTab(
         when {
             creating || editor != null -> ContactEditorPage(
                 existing = editor,
+                initialNumber = if (editor == null) seedNumber else "",
                 accounts = accounts,
                 onDismiss = {
                     creating = false
@@ -504,6 +517,7 @@ private fun ContactDetailPage(
     onStar: () -> Unit,
     onBlock: () -> Unit
 ) {
+    var share by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -582,6 +596,21 @@ private fun ContactDetailPage(
                 }
                 Spacer(Modifier.height(16.dp))
             }
+            if (contact.primaryNumber.isNotBlank()) {
+                InsetGroup {
+                    Text(
+                        "Share Contact",
+                        color = Accent,
+                        fontSize = 17.sp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { share = true }
+                            .padding(vertical = 14.dp),
+                        textAlign = TextAlign.Center
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+            }
             InsetGroup {
                 Text(
                     "Delete Contact",
@@ -597,11 +626,15 @@ private fun ContactDetailPage(
             Spacer(Modifier.height(28.dp))
         }
     }
+    if (share && contact.primaryNumber.isNotBlank()) {
+        ShareQrDialog(title = contact.name, payload = contact.primaryNumber, onDismiss = { share = false })
+    }
 }
 
 @Composable
 private fun ContactEditorPage(
     existing: DeviceContact?,
+    initialNumber: String = "",
     accounts: List<ContactAccount>,
     onDismiss: () -> Unit,
     onSave: (ContactDraft) -> Unit
@@ -609,8 +642,8 @@ private fun ContactEditorPage(
     val context = LocalContext.current
     val detected = remember { DialCountries.detect(context) }
     val initialNames = remember(existing?.contactId) { editorNames(existing) }
-    val initialPhone = remember(existing?.contactId) {
-        DialCountries.split(existing?.primaryNumber.orEmpty(), detected)
+    val initialPhone = remember(existing?.contactId, initialNumber) {
+        DialCountries.split(existing?.primaryNumber ?: initialNumber, detected)
     }
     var given by remember(existing?.contactId) { mutableStateOf(initialNames.first) }
     var family by remember(existing?.contactId) { mutableStateOf(initialNames.second) }
@@ -726,30 +759,27 @@ private fun ContactEditorPage(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { pickingCountry = true }
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(country.flag, fontSize = 22.sp)
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Country", color = TextDim, fontSize = 12.sp)
-                        Text(country.name, color = TextMain, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { pickingCountry = true }
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(country.flag, fontSize = 20.sp)
+                        Spacer(Modifier.width(6.dp))
+                        Text(country.dial, color = Accent, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                     }
-                    Text(country.dial, color = TextDim, fontSize = 17.sp)
-                    Spacer(Modifier.width(4.dp))
-                    Text("›", color = Color(0xFFC7C7CC), fontSize = 22.sp)
-                }
-                GroupDivider()
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("mobile", color = Accent, fontSize = 17.sp, modifier = Modifier.width(72.dp))
-                    Text(country.dial, color = TextMain, fontSize = 17.sp)
-                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .padding(vertical = 6.dp)
+                            .width(1.dp)
+                            .height(22.dp)
+                            .background(Line)
+                    )
                     BasicTextField(
                         value = number,
                         onValueChange = { raw ->
@@ -758,17 +788,19 @@ private fun ContactEditorPage(
                                 country = split.first
                                 number = split.second.filter { it.isDigit() }.take(16)
                             } else {
-                                number = raw.filter { it.isDigit() || it == ' ' || it == '-' || it == '(' || it == ')' }.take(20)
+                                number = raw.filter { it.isDigit() }.take(16)
                             }
                         },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 12.dp),
                         singleLine = true,
                         textStyle = TextStyle(color = TextMain, fontSize = 17.sp),
                         cursorBrush = SolidColor(Accent),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         decorationBox = { inner ->
                             Box {
-                                if (number.isBlank()) Text("Phone", color = TextDim, fontSize = 17.sp)
+                                if (number.isBlank()) Text("Phone number", color = TextDim, fontSize = 17.sp)
                                 inner()
                             }
                         }

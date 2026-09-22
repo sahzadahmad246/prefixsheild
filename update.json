@@ -1,6 +1,6 @@
 {
-  "versionCode": 6,
-  "versionName": "1.5.0",
-  "apkUrl": "https://github.com/sahzadahmad246/prefixsheild/releases/download/v1.5.0/app-release.apk",
-  "notes": "Apple-style incoming call, in-call screen, and call banners."
+  "versionCode": 7,
+  "versionName": "1.6.0",
+  "apkUrl": "https://github.com/sahzadahmad246/prefixsheild/releases/download/v1.6.0/app-release.apk",
+  "notes": "Fixed call history, dialer, contact form, and slide-to-answer calls."
 }
